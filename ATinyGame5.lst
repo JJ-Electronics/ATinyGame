@@ -1,0 +1,1293 @@
+gavrasm Gerd's AVR assembler version 5.0 (C)2021 by DG4FAC
+----------------------------------------------------------
+Source file: ATinyGame5.asm
+Hex file:    ATinyGame5.hex
+Eeprom file: ATinyGame5.eep
+Compiled:    18.01.2022, 16:38:02
+Pass:        2
+     1: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     2: ; written by Johan Vandegriff  ;
+     3: ; https://johanv.xyz/ATinyGame ;
+     4: ; ATTINY9             Dec 2021 ;
+     5: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     6: 
+     7: .include "tn9def.inc"
+ -> Warning 009: Include defs not necessary, using internal values!
+   File: ATinyGame5.asm, Line: 7
+   Source line: .include "tn9def.inc"
+     8: 
+     9: .CSEG ; code section
+    10: .ORG $0000 ; the starting address
+    11: 
+    12: 	;;; MEMORY LOCATIONS ;;;
+    13: 	
+    14: .equ RNG = 0x40
+    15: ;.equ ??? = 0x41
+    16: ;.equ ??? = 0x42
+    17: 	
+    18: 	;;; SETUP ;;;
+    19: 	
+    20: 	; set up the stack
+    21: 000000   E0E0  ldi r30, high(RAMEND)
+    22: 000001   BFEE  out SPH, r30
+    23: 000002   E5EF  ldi r30, low(RAMEND)
+    24: 000003   BFED  out SPL, r30
+    25: 	
+    26: 	; set clock divider
+    27: 000004   E0E0  ldi r30, 0x00 ; clock divided by 1
+    28: 000005   EDF8  ldi r31, 0xD8 ; the key for CCP
+    29: 000006   BFFC  out CCP, r31 ; Configuration Change Protection, allows protected changes
+    30: 000007   BFE6  out CLKPSR, r30 ; sets the clock divider
+    31: 	
+    32: 	; nop for sync
+    33: 000008   0000  nop
+    34: 	
+    35: 	; REGISTERS
+    36: 	; r16 gameSelect idx; transition/shortDelay/whackamoleWhileAnyPressed next state
+    37: 	; r17 memory/whackamole/stacker score
+    38: 	; r18 current state
+    39: 	; r19 button just pressed edge detection
+    40: 	; r20 LED(0,0); LED(0,1)
+    41: 	; r21 LED(0,2); LED(1,0)
+    42: 	; r22 LED(1,1); LED(1,2)
+    43: 	; r23 LED(2,0); LED(2,1)
+    44: 	; r24 LED(2,2); has RNG been seeded; LRS button states
+    45: 	; r25 loop counter
+    46: 	; r26 generalScore next state; memory saved RNG; stacker moving bar
+    47: 	; r27 transition timer; memory sequence idx; whackamole timer; stacker delay
+    48: 	; r28 randomLED bitmask; stacker direction of motion
+    49: 	; r29 system tmp; unused in game logic (could use to save space?)
+    50: 	; r30 system/game tmp; function arg/return; random value 0-5
+    51: 	; r31 system/game tmp; function arg/return; random value 0-254
+    52: 	;
+    53: 	; MEMORY
+    54: 	; 0x40 RNG
+    55: 	; 0x41
+    56: 	; 0x42
+    57: 	; 0x43
+    58: 	; 0x44
+    59: 	; 0x45
+    60: 	; 0x46
+    61: 	; 0x47
+    62: 	; 0x48
+    63: 	; 0x49
+    64: 	; 0x4a
+    65: 	; 0x4b
+    66: 	; 0x4c
+    67: 	; 0x4d
+    68: 	; 0x4e
+    69: 	; 0x4f
+    70: 	; 0x50
+    71: 	; 0x51
+    72: 	; 0x52
+    73: 	; 0x53
+    74: 	; 0x54
+    75: 	; 0x55
+    76: 	; 0x56
+    77: 	; 0x57
+    78: 	; 0x58
+    79: 	; 0x59 stack furthest address (because no more than 3 rcalls are nested)
+    80: 	; 0x5a
+    81: 	; 0x5b
+    82: 	; 0x5c
+    83: 	; 0x5d
+    84: 	; 0x5e
+    85: 	; 0x5f stack starting address
+    86: 	
+    87: 	
+    88: 	; buttons
+    89: 	;   r24 0b!!!!_NLRS
+    90: 	;         7654_3210
+    91: 	;
+    92: 	; 0 = S 0b0000_0001 is pressed
+    93: 	; 1 = R 0b0000_0010 is pressed
+    94: 	; 2 = L 0b0000_0100 is pressed
+    95: 	; 3 = N 0b0000_1000 has random number generator been initialized
+    96: 	; note that the high nybble is used for an LED
+    97: 	
+    98: 	;set the buttons to "pressed" so if you start it while holding a button
+    99: 	;you have to release it and press it again, which might help the RNG seeding?
+   100: 000009   E087  ldi r24, 0b0000_0111
+   101: 	
+   102: 	
+   103: 	; button edge detection
+   104: 	;   r19 0b0000_0LRS
+   105: 	;         7654_3210
+   106: 	;
+   107: 	; 0 = S 0b0000_0001 just pressed
+   108: 	; 1 = R 0b0000_0010 just pressed
+   109: 	; 2 = L 0b0000_0100 just pressed
+   110: 	
+   111: 00000A   2733  clr r19 ;clear the just pressed states
+   112: 	
+   113: 	
+   114: 	; LED grid (L = low nybble, H = high nybble):
+   115: 	; note that r24L is reserved for buttons
+   116: 	;
+   117: 	; r20H r21L r23H   0,0 1,0 2,0
+   118: 	; r20L r22H r23L   0,1 1,1 2,1
+   119: 	; r21H r22L r24H   0,2 1,2 2,2
+   120: 	
+   121: 00000B   D18F  rcall clearScreen
+   122: 	
+   123: 	; r25 will be a loop counter used for:
+   124: 	;   LED effect calculations
+   125: 	;   random number seeding
+   126: 	;   timing events (under 4 seconds)
+   127: 00000C   2799  clr r25 ;one cycle through the 256 values = 4 seconds, so 64 frames/sec
+   128: 	
+   129: 	; each LED has 4 bits, which are used for a one-hot code
+   130: 	; val  state
+   131: 	; 0    off
+   132: 	; 1    on
+   133: 	; 2    dim
+   134: 	; 3    unused
+   135: 	; 4    blinking
+   136: 	; 5-f  unused
+   137: 	
+   138: 	; OLD CODES: 
+   139: 	; 0 off
+   140: 	; 1 bright
+   141: 	; 2 dim
+   142: 	; 3 unused
+   143: 	; 4 blinking fast
+   144: 	; 5 blinking slow
+   145: 	; 6 blinking fast, out of phase
+   146: 	; 7 blinking slow, out of phase
+   147: 	; 8 fading fast
+   148: 	; 9 fading slow
+   149: 	; a fading fast, out of phase
+   150: 	; b fading slow, out of phase
+   151: 	; c unused
+   152: 	; d unused
+   153: 	; e unused
+   154: 	; f unused
+   155: 	; ideas for the unused ones
+   156: 	; blinking duty cycle (on 1/4, off 3/4 or reversed)
+   157: 	; blinking/fading medium speed, in/out of phase
+   158: 	; blinking dim
+   159: 	; sparkle
+   160: 	; blinking between dim and bright
+   161: 	;   possibly implement fading as this but fast and with many levels?
+   162: 	
+   163: 	
+   164: 	;;; TODO ;;;
+   165: 	
+   166: 	; FEATURES
+   167: 	; +button edge detection
+   168: 	; +dice/score display
+   169: 	; +pseudorandom generator
+   170: 	; +dice roll "game"
+   171: 	; +stacker game
+   172: 	; +game select
+   173: 	; +screen transition state
+   174: 	; +whack-a-mole game
+   175: 	; +memory game
+   176: 	; +reaction time game
+   177: 	; racing game
+   178: 	; tic-tac-toe
+   179: 	; blackjack 13
+   180: 	; maze game
+   181: 	
+   182: 	; MORE IDEAS
+   183: 	; sleep to save battery?
+   184: 	; vcc level monitoring for low battery detection?
+   185: 	; implement LED fading?
+   186: 	; graphics demo?
+   187: 	; button just released?
+   188: 	; button debouncing?
+   189: 	; could vary the delay time for transition for free by ldi r25 instead of clr r25
+   190: 	; +check for overflow when incrementing each game's score and cap at 128
+   191: 	
+   192: 	; CODE GOLFING TO DECREASE PROGRAM SIZE
+   193: 	; +14 combine into 1 game select state
+   194: 	; +2 combine static and moving bar
+   195: 	; +3 combine delay states into 1 with a signal of what state to go to next
+   196: 	; +13 fix the animation so it doesn't have to save and restore the screen
+   197: 	; +6 always delay even if the animation is not needed
+   198: 	; +6 change LED codes to be one-hot
+   199: 	; +6 remove push/pop in functions if not needed (showScore, fallScreen, random)
+   200: 	; +3 use slower and more compact mod6 algorithm
+   201: 	; +2 rewrite random function to retrieve the value from memory multiple times
+   202: 	; +0 generalize score state for all games
+   203: 	; +4 don't need to push r30 and r31 between game logic
+   204: 	; +1 don't need to rjmp statesEnd in the last state
+   205: 	; +26 for the state machine, use "push r30" then "ret" to manually set the PC to the address of one of the many rjmp instructions in a row
+   206: 	; +2 compact all the states to remove dead ones
+   207: 	; +3 might not need stackerFreeze
+   208: 	; +2 store the next state for generalScore in r26 instead of the stack
+   209: 	; +2 use r30 and r31 as the tmp registers instead of r16 and r17, then replace the push/ret with an ijmp to Z, aka r16 and r17
+   210: 	; +5 don't roll 5 times when seeding the RNG (it could loop back to 0 anyway)
+   211: 	; +1 fillScreen function
+   212: 	; +2 rearrange register so don't have to push/pop r18, r29 is a new tmp var
+   213: 	; +1 rearrange stacker delay decrease logic
+   214: 	; +2 random also does mod6
+   215: 	; +1 jump directly from stackerInit to stackerMove
+   216: 	; +1 jump directly from stackerMove to stackerFall
+   217: 	; +1 optimize randomLED
+   218: 	; +1 can skip a skip instead of skipping a jump in led
+   219: 	; +9 used bst and bld to simplify fallScreen
+   220: 	;TOTAL GOLFED: +118
+   221: 	;
+   222: 	; use more bst and bld (e.g. in stacker blinking animation)
+   223: 	; find ways to use more RAM and decrease program size
+   224: 	
+   225: 	
+   226: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+   227: 
+   228: 	;;; GAME LOGIC ;;;
+   229: 00000D   E026  ldi r18, 6 ;current state starts at transition
+   230: 00000E   E000  ldi r16, 0 ;then it will go to gameSelect
+   231: loop:
+   232: 	;check the state
+   233: 	
+   234: 00000F   E1E3  ldi r30, PC+4 ;4 is the number of lines after this one to jump to for state 0
+   235: 000010   0FE2  add r30, r18 ;plus r18 (the current state)
+   236: 000011   E0F0  ldi r31, 0 ;high byte = 0 since we are (hopefully) in the first 256 instructions
+   237: 000012   9409  ijmp ;copy Z (r30 & r31) to PC, which jumps
+   238: 	
+   239: 000013   C014  rjmp gameSelect ;state 0
+   240: 000014   C09C  rjmp stackerInit ;state 1
+   241: 000015   C02C  rjmp reactionInit ;state 2
+   242: 000016   C040  rjmp memoryInit ;state 3
+   243: 000017   C06E  rjmp whackamoleInit ;state 4
+   244: 000018   C08F  rjmp diceRoller ;state 5
+   245: 000019   C01E  rjmp transition ;state 6
+   246: 00001A   C044  rjmp memoryShow ;state 7
+   247: 00001B   C052  rjmp memoryPress ;state 8
+   248: 00001C   C06D  rjmp whackamoleMole ;state 9
+   249: 00001D   C06E  rjmp whackamoleWait ;state 10
+   250: 00001E   C09C  rjmp stackerMove ;state 11
+   251: 00001F   C114  rjmp generalScore ;state 12
+   252: 000020   C0B4  rjmp stackerFall ;state 13
+   253: 000021   C0CA  rjmp shortDelay ;state 14
+   254: 000022   C0CC  rjmp stackerFall2 ;state 15
+   255: 000023   C07C  rjmp whackamoleWhileAnyPressed ;state 16
+   256: 000024   C03F  rjmp memoryShowBetween ;state 17
+   257: 000025   C0DA  rjmp stackerFell ;state 18
+   258: 000026   C01F  rjmp reactionWait ;state 19
+   259: 000027   C024  rjmp reactionPress ;state 20
+   260: 	
+   261: gameSelect:
+   262: 000028   2FE0  mov r30, r16
+   263: 000029   D181  rcall showScore
+   264: 	
+   265: 00002A   27BB  clr r27 ;clear the timer for the transition
+   266: 	
+   267: 00002B   FD32  sbrc r19, 2 ;if L was just pressed
+   268: 00002C   950A  dec r16 ;decrement the selected game
+   269: 00002D   5000  subi r16, 0 ;if r16 == 0
+   270: 00002E   F009  breq gameSelectInc ;if r16 == 0: r16++
+   271: 	
+   272: 00002F   FD31  sbrc r19, 1 ;if R was just pressed
+   273:  gameSelectInc:
+   274: 000030   9503  inc r16 ;increment the selected game
+   275: 	
+   276: 000031   2FE0  mov r30, r16
+   277: 000032   50E6  subi r30, 6
+   278: 000033   F409  brne gameSelectNoDec ;if r16 == 6: r16--
+   279: 000034   950A  dec r16
+   280:  gameSelectNoDec:
+   281: 	
+   282: 	
+   283: 	;limit to 7 maximum and loop around
+   284: ;	andi r16, 0b111
+   285: ;	subi r16, 0 ;if r16 == 0
+   286: ;	breq gameSelectInc ;r16++
+   287: 	
+   288: 000035   FD30  sbrc r19, 0 ;if S was just pressed
+   289: 000036   E026  ldi r18, 6 ;change state to transition
+   290: 	;it will go to the selected game next
+   291: 	
+   292: 000037   C106  rjmp statesEnd
+   293: 	
+   294: transition:
+   295: 	;show dim lights
+   296: 000038   E242  ldi r20, 0x22
+   297: 000039   D15B  rcall fillScreen
+   298: 00003A   6280  sbr r24, 0x20 ;avoid messing up the seeding and buttons
+   299: 	
+   300: 00003B   95B3  inc r27 ;increment the timer
+   301: 00003C   FFB5  sbrs r27, 5 ;if bit 5 in the timer is 1 (it has been 1/2 second)
+   302: 00003D   C100  rjmp statesEnd
+   303: 	
+   304: 00003E   2F20  mov r18, r16 ;move to whatever next state was specified in r16
+   305: 00003F   E001  ldi r16, 1 ;set r16 to 1 in case we are going back to gameSelect
+   306: 000040   D15A  rcall clearScreen ;clear the screen to prepare for the next state
+   307: 	
+   308: 000041   C0FC  rjmp statesEnd
+   309: 	
+   310: reactionInit:
+   311: 000042   D196  rcall random
+   312: 000043   2F9F  mov r25, r31
+   313: 000044   E123  ldi r18, 19 ;change state to reactionWait
+   314: 000045   C0F8  rjmp statesEnd
+   315: 	
+   316: reactionWait:
+   317: 000046   5090  subi r25, 0 ;if the random timer is up
+   318: 000047   F419  brne reactionWaitEnd
+   319: 	
+   320: 000048   6160  sbr r22, 0x10 ;turn on LED(1,1)
+   321: 	
+   322: 000049   E411  ldi r17, 65 ;allow 1 second to press it
+   323: 00004A   E124  ldi r18, 20 ;change state to reactionPress
+   324:  reactionWaitEnd:
+   325: 00004B   C0F2  rjmp statesEnd
+   326: 	
+   327: reactionPress:
+   328: 00004C   951A  dec r17 ;decrease the score
+   329: 00004D   F011  breq reactionPressGameOver ;if the score is 0 (4 sec has passed), end the game
+   330: 00004E   FF30  sbrs r19, 0 ;if S pressed
+   331: 00004F   C0EE  rjmp statesEnd
+   332: 
+   333:  reactionPressGameOver:
+   334: 	
+   335: 000050   9516  lsr r17 ;divide score by 2
+   336: 000051   9516  lsr r17 ;divide score by 2
+   337: 000052   27BB  clr r27 ;clear the timer for the transition
+   338: 000053   E026  ldi r18, 6 ;change state to transition
+   339: 000054   E00C  ldi r16, 12 ;after that, change state to generalScore
+   340: 000055   E0A2  ldi r26, 2 ;finally, it will be memoryInit
+   341: 	
+   342: 000056   C0E7  rjmp statesEnd
+   343: 	
+   344: memoryInit:
+   345: 000057   D181  rcall random ;make sure the RNG is seeded, now we can use r25 after
+   346: 000058   2FAF  mov r26, r31 ;store the first number in the sequence so it can be recreated
+   347: 	
+   348: 000059   E011  ldi r17, 1 ;the score (length of the memory sequence)
+   349: 	;it is 1 higher than the actual number of presses
+   350: 00005A   E0B1  ldi r27, 1 ;the number of items left in the current sequence
+   351: 	
+   352: 00005B   2799  clr r25 ;reset the timer
+   353: 00005C   E02E  ldi r18, 14 ;change state to shortDelay
+   354: 00005D   E007  ldi r16, 7 ;then change state to memoryShow
+   355: 00005E   C0DF  rjmp statesEnd
+   356: 	
+   357: memoryShow:
+   358: 00005F   D18E  rcall randomLED
+   359: 000060   2799  clr r25 ;reset the timer
+   360: 000061   E02E  ldi r18, 14 ;change state to shortDelay
+   361: 000062   E101  ldi r16, 17 ;then change state to memoryShowBetween
+   362: 000063   C0DA  rjmp statesEnd
+   363: 
+   364: memoryShowBetween:
+   365: 000064   2799  clr r25 ;reset the timer
+   366: 000065   E02E  ldi r18, 14 ;change state to shortDelay
+   367: 000066   E007  ldi r16, 7 ;then change state to memoryShow
+   368: 	
+   369: 000067   D133  rcall clearScreen
+   370: 	
+   371: 000068   95BA  dec r27 ;decrement sequence index
+   372: 000069   F419  brne memoryShowBetweenEnd ;if the sequence is done showing
+   373: 	
+   374: 00006A   A9A0  sts RNG, r26 ;store the original random value back to the RNG to start over
+   375: 00006B   2FB1  mov r27, r17 ;reset the sequence index to the sequence length (score)
+   376: 00006C   E028  ldi r18, 8 ;change state to memoryPress
+   377: 	
+   378: memoryShowBetweenEnd:
+   379: 00006D   C0D0  rjmp statesEnd
+   380: 	
+   381: memoryPress:
+   382: 00006E   5030  subi r19, 0
+   383: 00006F   F061  breq memoryPressEnd ;if any button was just pressed:
+   384: 	
+   385: 000070   D17D  rcall randomLED ;puts the button mask into r28
+   386: 000071   D129  rcall clearScreen
+   387: 	
+   388: 000072   23C3  and r28, r19 ;see if the correct button was just pressed
+   389: 000073   F049  breq memoryPressGameOver
+   390: 		
+   391: 000074   95BA  dec r27 ;decrement sequence index
+   392: 000075   F431  brne memoryPressEnd ;if the sequence is done being entered
+   393: 	
+   394: 000076   A9A0  sts RNG, r26 ;store the original random value back to the RNG to start over
+   395: 000077   2799  clr r25 ;reset the timer
+   396: 000078   E02E  ldi r18, 14 ;change state to shortDelay
+   397: 000079   E007  ldi r16, 7 ;then change state to memoryShow
+   398: 00007A   D155  rcall incScore ;increase the score by 1 (the sequence length will also increase)
+   399: 00007B   2FB1  mov r27, r17 ;reset the sequence index to the sequence length (score)
+   400: 
+   401:  memoryPressEnd:
+   402: 00007C   C0C1  rjmp statesEnd
+   403: 	
+   404:  memoryPressGameOver:
+   405:  	;exhaust the rest of the RNG sequence
+   406: 00007D   D15B  rcall random
+   407: 00007E   95BA  dec r27
+   408: 00007F   F7E9  brne memoryPressGameOver
+   409:  	
+   410: ;	dec r17 ;decrease the score by 1 to account for the extra one at the start
+   411: 000080   9516  lsr r17 ;divide score by 2
+   412: 000081   27BB  clr r27 ;clear the timer for the transition
+   413: 000082   E026  ldi r18, 6 ;change state to transition
+   414: 000083   E00C  ldi r16, 12 ;after that, change state to generalScore
+   415: 000084   E0A3  ldi r26, 3 ;finally, it will be memoryInit
+   416: 000085   C0B8  rjmp statesEnd
+   417: 	
+   418: whackamoleInit:
+   419: 000086   27BB  clr r27 ;clear the loop counter, when it reaches 255 (4 sec) the game is over
+   420: 000087   E010  ldi r17, 0 ;score (number of moles hit)
+   421: 
+   422: 000088   E029  ldi r18, 9 ;change state to whackamoleMole
+   423: 000089   C0B4  rjmp statesEnd
+   424: 	
+   425: whackamoleMole:
+   426: 00008A   E02A  ldi r18, 10 ;change state to whackamoleWait
+   427: 00008B   D162  rcall randomLED
+   428: 	
+   429: whackamoleWait:
+   430: 00008C   95B3  inc r27 ;increment the timer
+   431: 00008D   F071  breq whackamoleTimeUp
+   432: 	
+   433:  whackamoleWaitTimeLeft:
+   434: 00008E   5030  subi r19, 0
+   435: 00008F   F059  breq whackamoleWaitingStill ;if any button was just pressed:
+   436: 000090   2FEC  mov r30, r28 ;copy the bitmask
+   437: 000091   23E3  and r30, r19 ;see if the correct button was just pressed
+   438: 000092   F029  breq whackamoleWaitWrongButton
+   439: 000093   D13C  rcall incScore ;add 1 to the score
+   440: 000094   D106  rcall clearScreen
+   441: 000095   E120  ldi r18, 16 ;change state to whackamoleWhileAnyPressed
+   442: 000096   E009  ldi r16, 9 ;after that, change state to whackamoleMole
+   443: 000097   C0A6  rjmp statesEnd
+   444: 	
+   445:  whackamoleWaitWrongButton:
+   446: 000098   5010  subi r17, 0 ;if score is already 0
+   447: 000099   F009  breq whackamoleWaitingStill ;don't decrement
+   448: 	
+   449: 00009A   951A  dec r17 ;decrease the score because the wrong button was pressed
+   450: 	
+   451:  whackamoleWaitingStill:
+   452: 00009B   C0A2  rjmp statesEnd
+   453: 	
+   454:  whackamoleTimeUp:
+   455: ;	lsr r17 ;divide score by 2
+   456: 	;timer is already cleared for the transition
+   457: 00009C   E026  ldi r18, 6 ;change state to transition
+   458: 00009D   E00C  ldi r16, 12 ;after that, change state to generalScore
+   459: 00009E   E0A4  ldi r26, 4 ;finally, it will be whackamoleInit
+   460: 00009F   C09E  rjmp statesEnd
+   461: 	
+   462: whackamoleWhileAnyPressed:
+   463: 0000A0   95B3  inc r27 ;increment the timer
+   464: 0000A1   F3D1  breq whackamoleTimeUp
+   465: 	
+   466: ;whileAnyPressed:
+   467: 0000A2   2FE8  mov r30, r24
+   468: 0000A3   70E7  cbr r30, 0b1111_1000
+   469: 0000A4   50E0  subi r30, 0 ;if any button is pressed
+   470: 0000A5   F571  brne statesEnd2 ;do nothing
+   471: 	;otherwise:
+   472: 0000A6   2F20  mov r18, r16 ;move to whatever next state was specified in r16
+   473: 0000A7   C096  rjmp statesEnd
+   474: 	
+   475: diceRoller:
+   476: 	;sbrc r19, 0 ;if S just pressed
+   477: 	;rcall clearScreen ;clear the screen
+   478: 	
+   479: 0000A8   FD32  sbrc r19, 2 ;if L was just pressed, run the next line
+   480: 0000A9   E026  ldi r18, 6 ;change state to transition
+   481: 0000AA   E000  ldi r16, 0 ;after that the state will be gameSelect
+   482: 0000AB   27BB  clr r27	;clear the timer for the transition state
+   483: 	
+   484: 0000AC   D12C  rcall random ;get a random number from 0 to 254
+   485: ;	rcall mod6 ;take the remainder when dividing by 6, so 0 to 5
+   486: 0000AD   95E3  inc r30 ;add 1, so 1 to 6
+   487: 	
+   488: 0000AE   FD31  sbrc r19, 1 ;if R just pressed, skip next line
+   489: 0000AF   D0FB  rcall showScore ;display it as a dice number on the LEDs
+   490: 	
+   491: 0000B0   C08D  rjmp statesEnd
+   492: 	
+   493: stackerInit:
+   494: 	;turn on the bottom 2 rows of LEDs, and the top left LED
+   495: 0000B1   E141  ldi r20, 0x11
+   496: 0000B2   E150  ldi r21, 0x10
+   497: 0000B3   D0E2  rcall helpFillScreen
+   498: 0000B4   6180  sbr r24, 0x10 ;avoid messing up the seeding and buttons
+   499: 	
+   500: 0000B5   2799  clr r25             ;clear the loop counter for consistent movement
+   501: 0000B6   E7A0  ldi r26, 0b01110000 ;the moving top row
+   502: 0000B7   E0C1  ldi r28, 1          ;the direction of motion (1 = >>, 0 = <<)
+   503: 0000B8   E0BD  ldi r27, 13         ;the delay between movements (next: 13-2)
+   504: 0000B9   E010  ldi r17, 0          ;the score (number of times the button was pressed, minus 1)
+   505: 	
+   506: 	;score   1  2 3 4 5 6 7 8 9 a b c d e f
+   507: 	;delay 13,11,9,8,7,6,5,4,3,3,3,2,2,2,1,1,1,1,1,1,...
+   508: 	;delta   2  2 1 1 1 1 1 1 0 0 1 0 0 1 0
+   509: 	;x=200 #x starts at 200ms and decreases by 15% every time
+   510: 	;for i in range(25): print(int(x/15.625+0.5)*15.625); x *= .85
+   511: 	;for i in range(25): print(int(x/15.625+0.5)); x *= .85
+   512: 	
+   513: 	;       top row
+   514: 	;         |||
+   515: 	; 3  1 01110000
+   516: 	; 3  2 00111000
+   517: 	; 3  3 00011100
+   518: 	; 3  4 00001110
+   519: 	; 3  5 00000111
+   520: 	;         |||
+   521: 	; 2  1 00110000
+   522: 	; 2  2 00011000
+   523: 	; 2  3 00001100
+   524: 	; 2  4 00000110
+   525: 	;         |||
+   526: 	; 1  1 00010000
+   527: 	; 1  2 00001000
+   528: 	; 1  3 00000100
+   529: 	;         |||
+   530: 	
+   531: 0000BA   E02B  ldi r18, 11 ;change state to stackerMove
+   532: 	
+   533: 	;fall thru to the next state on purpose
+   534: ;	rjmp statesEnd
+   535: 
+   536: stackerMove:
+   537: 0000BB   FD30  sbrc r19, 0 ;if S was just pressed, run the next line
+   538: 0000BC   C018  rjmp stackerFall
+   539: 	
+   540: 0000BD   2FE9  mov r30, r25
+   541: 0000BE   1BEB  sub r30, r27 ;check if the delay has elapsed yet
+   542: 0000BF   F4A1  brne statesEnd2
+   543: 0000C0   2799  clr r25
+   544: 	
+   545: 	
+   546: 0000C1   FDC0  sbrc r28, 0 ;if r28 = 1 (moving right)
+   547: 0000C2   95A6  lsr r26
+   548: 	
+   549: 0000C3   FFC0  sbrs r28, 0 ;if r28 = 0 (moving left)
+   550: 0000C4   0FAA  lsl r26
+   551: 	
+   552: 	;bits 4, 3, and 2 of r26 are the top row
+   553: 0000C5   D0E1  rcall clearTopRow
+   554: 		
+   555: 0000C6   FDA4  sbrc r26, 4   ;if bit 4 is set
+   556: 0000C7   6140  sbr r20, 0x10 ;light up LED 0,0
+   557: 0000C8   FDA3  sbrc r26, 3   ;if bit 4 is set
+   558: 0000C9   6051  sbr r21, 0x01 ;light up LED 1,0
+   559: 0000CA   FDA2  sbrc r26, 2   ;if bit 4 is set
+   560: 0000CB   6170  sbr r23, 0x10 ;light up LED 2,0
+   561: 	
+   562: 	;reverse direction when it reaches the edge
+   563: 0000CC   FD50  sbrc r21, 0 ;if LED 1,0 is on
+   564: 0000CD   C070  rjmp statesEnd ;jump to end
+   565: 	
+   566: 	;if r28 == 1 and !LED(1,0) and LED(2,0): r28 = 0
+   567: 	;if r28 == 0 and !LED(1,0) and LED(0,0): r28 = 1
+   568: 	;since LED(1,0) has already been checked this becomes:
+   569: 	;if r28 == 1 and r23H: r28 = 0
+   570: 	;if r28 == 0 and r20H: r28 = 1
+   571: 	
+   572: 0000CE   FFC0  sbrs r28, 0 ;if r28 = 0
+   573: 0000CF   C002  rjmp stackerMover28is0
+   574: 	
+   575: 	;r28 == 1
+   576: 0000D0   FD74  sbrc r23, 4 ;if r23H
+   577: 0000D1   E0C0  ldi r28, 0
+   578: 	
+   579:  stackerMover28is0:
+   580: 0000D2   FD44  sbrc r20, 4 ;if r20H
+   581: 0000D3   E0C1  ldi r28, 1
+   582: 	
+   583:  statesEnd2:
+   584: 0000D4   C069  rjmp statesEnd
+   585: 	
+   586: 	
+   587: stackerFall:
+   588: 0000D5   E02D  ldi r18, 13 ;make sure to change state to stackerFall since it jumped here
+   589: 	;save the screen for later so it isn't ruined by the animations
+   590: 	;push r20
+   591: 	;push r21
+   592: 	;push r22
+   593: 	;push r23
+   594: 	;push r24
+   595: 	
+   596: 	;ldi r30, 0 ;keep track of if any are blinking
+   597: 	
+   598: 	;whichever ones should fall, make them blink
+   599: 0000D6   FD40  sbrc r20, 0   ;if LED(0,1)==0
+   600: 0000D7   C004  rjmp stackerFallCol1Done
+   601: 0000D8   FF44  sbrs r20, 4   ;and LED(0,0)==1
+   602: 0000D9   C002  rjmp stackerFallCol1Done
+   603: 0000DA   704F  cbr r20, 0xf0 ;clear LED(0,0)
+   604: 0000DB   6440  sbr r20, 0x40 ;set LED(0,0) to blink
+   605: 	;ldi r30, 1    ;mark that at least 1 is blinking
+   606:  stackerFallCol1Done:
+   607: 	
+   608: 0000DC   FD64  sbrc r22, 4   ;if LED(1,1)==0
+   609: 0000DD   C004  rjmp stackerFallCol2Done
+   610: 0000DE   FF50  sbrs r21, 0   ;and LED(1,0)==1
+   611: 0000DF   C002  rjmp stackerFallCol2Done
+   612: 0000E0   7F50  cbr r21, 0x0f ;clear LED(1,0)
+   613: 0000E1   6054  sbr r21, 0x04 ;set LED(1,0) to blink
+   614: 	;ldi r30, 1    ;mark that at least 1 is blinking
+   615:  stackerFallCol2Done:
+   616: 	
+   617: 0000E2   FD70  sbrc r23, 0   ;if LED(2,1)==0
+   618: 0000E3   C004  rjmp stackerFallCol3Done
+   619: 0000E4   FF74  sbrs r23, 4   ;and LED(2,0)==1
+   620: 0000E5   C002  rjmp stackerFallCol3Done
+   621: 0000E6   707F  cbr r23, 0xf0 ;clear LED(2,0)
+   622: 0000E7   6470  sbr r23, 0x40 ;set LED(2,0) to blink
+   623: 	;ldi r30, 1    ;mark that at least 1 is blinking
+   624:  stackerFallCol3Done:
+   625: 	
+   626: 0000E8   2799  clr r25 ;clear the counter to start the next state's timer at 0
+   627: 0000E9   E02E  ldi r18, 14 ;change state to shortDelay
+   628: 0000EA   E00F  ldi r16, 15 ;change state to stackerFall2 after that
+   629: 	
+   630: 	;if none are blinking, skip the entire rest of the animation
+   631: 	;sbrs r30, 0 ;if r30 == 0
+   632: 	;ldi r18, 18 ;change state to stackerFell
+   633: 	
+   634: 0000EB   C052  rjmp statesEnd
+   635: 	
+   636: shortDelay:
+   637: 0000EC   FD95  sbrc r25, 5 ;if bit 5 in the counter is 1, it has been 1/2 second so:
+   638: 0000ED   2F20  mov r18, r16 ;move to whatever next state was specified in r16
+   639: 0000EE   C04F  rjmp statesEnd
+   640: 	
+   641: stackerFall2:
+   642: 	;make the blinking ones fall from the top row to the middle
+   643: 	
+   644: 0000EF   FF46  sbrs r20, 6   ;if LED(0,0)==4 (blinking)
+   645: 0000F0   C002  rjmp stackerFall2Col1Done
+   646: 0000F1   7040  cbr r20, 0xff ;turn off LED(0,0) and LED(0,1)
+   647: 0000F2   6044  sbr r20, 0x04 ;set LED(0,1)=4 (blinking)
+   648:  stackerFall2Col1Done:
+   649: 	
+   650: 0000F3   FF52  sbrs r21, 2   ;if LED(1,0)==4 (blinking)
+   651: 0000F4   C003  rjmp stackerFall2Col2Done
+   652: 0000F5   7F50  cbr r21, 0x0f ;turn off LED(1,0)
+   653: 0000F6   706F  cbr r22, 0xf0 ;turn off LED(1,1)
+   654: 0000F7   6460  sbr r22, 0x40 ;set LED(1,1)=4 (blinking)
+   655:  stackerFall2Col2Done:
+   656: 	
+   657: 0000F8   FF76  sbrs r23, 6   ;if LED(2,0)==4 (blinking)
+   658: 0000F9   C002  rjmp stackerFall2Col3Done
+   659: 0000FA   7070  cbr r23, 0xff ;turn off LED(2,0) and LED(2,1)
+   660: 0000FB   6074  sbr r23, 0x04 ;set LED(2,1)=4 (blinking)
+   661:  stackerFall2Col3Done:
+   662: 	
+   663: 0000FC   2799  clr r25 ;clear the counter to start the next state's timer at 0
+   664: 	
+   665: 0000FD   E02E  ldi r18, 14 ;change state to shortDelay
+   666: 0000FE   E102  ldi r16, 18 ;change state to stackerFell next
+   667: 0000FF   C03E  rjmp statesEnd
+   668: 	
+   669: ;stackerFall3:
+   670: ;	;make the blinking ones fall from the middle to the bottom
+   671: ;	
+   672: ;	sbrs r20, 2   ;if LED(0,1)==4 (blinking)
+   673: ;	rjmp stackerFall3Col1Done
+   674: ;	cbr r20, 0x0f ;turn off LED(0,1)
+   675: ;	cbr r21, 0xf0 ;turn off LED(0,2)
+   676: ;	sbr r21, 0x40 ;set LED(0,2)=4 (blinking)
+   677: ; stackerFall3Col1Done:
+   678: ;	
+   679: ;	sbrs r22, 6   ;if LED(1,1)==4 (blinking)
+   680: ;	rjmp stackerFall3Col2Done
+   681: ;	cbr r22, 0xff ;turn off LED(1,1) and LED(1,2)
+   682: ;	sbr r22, 0x04 ;set LED(1,2)=4 (blinking)
+   683: ; stackerFall3Col2Done:
+   684: ;	
+   685: ;	sbrs r23, 2   ;if LED(2,1)==4 (blinking)
+   686: ;	rjmp stackerFall3Col3Done
+   687: ;	cbr r23, 0x0f ;turn off LED(2,1)
+   688: ;	cbr r24, 0xf0 ;turn off LED(2,2)
+   689: ;	sbr r24, 0x40 ;set LED(2,2)=4 (blinking)
+   690: ; stackerFall3Col3Done:
+   691: ;	
+   692: ;	clr r25 ;clear the counter to start the next state's timer at 0
+   693: ;	ldi r18, 18 ;change state to stackerFall6
+   694: ;	rjmp statesEnd
+   695: 	
+   696: stackerFell:
+   697: 	;restore the screen from before the animations
+   698: 	;pop r24
+   699: 	;pop r23
+   700: 	;pop r22
+   701: 	;pop r21
+   702: 	;pop r20
+   703: 	
+   704: 	
+   705: 	;sbrs r20, 0   ;if LED(0,1)==0
+   706: 	;cbr r20, 0xf0 ;clear LED(0,0)
+   707: 	
+   708: 	;sbrs r22, 4   ;if LED(1,1)==0
+   709: 	;cbr r21, 0x0f ;clear LED(1,0)
+   710: 	
+   711: 	;sbrs r23, 0   ;if LED(2,1)==0
+   712: 	;cbr r23, 0xf0 ;clear LED(2,0)
+   713: 	
+   714: 	
+   715: 	;get rid of the blinking on the 2nd row from the falling animation
+   716: 000100   7F4B  cbr r20, 0b0000_0100 ;clear LED(0,1)'s "blinking" bit
+   717: 000101   7B6F  cbr r22, 0b0100_0000 ;clear LED(1,1)'s "blinking" bit
+   718: 000102   7F7B  cbr r23, 0b0000_0100 ;clear LED(2,1)'s "blinking" bit
+   719: 	
+   720: 000103   27AA  clr r26 ;reset the moving bar
+   721: 	
+   722: 	;recalculate the width of the moving bar
+   723: 000104   FD44  sbrc r20, 4   ;if LED(0,0)==1
+   724: 000105   60A4  sbr r26, 0b100
+   725: 	
+   726: 000106   FD50  sbrc r21, 0   ;if LED(1,0)==1
+   727: 000107   60A2  sbr r26, 0b010
+   728: 	
+   729: 000108   FD74  sbrc r23, 4   ;if LED(2,0)==1
+   730: 000109   60A1  sbr r26, 0b001
+   731: 	
+   732: 	;r26 can be 000, 001, 011, 111, 110, 100
+   733: 	;for the last 2, it needs to be shifted over
+   734: 00010A   FFA0  sbrs r26, 0 ;if the final bit is 0
+   735: 00010B   95A6  lsr r26     ;shift right
+   736: 00010C   FFA0  sbrs r26, 0 ;if the final bit is 0
+   737: 00010D   95A6  lsr r26     ;shift right
+   738: 	
+   739: 	;if the game is over
+   740: 00010E   50A0  subi r26, 0
+   741: 00010F   F429  brne stackerFellGameContinue
+   742: 	
+   743: ;	ldi r18, 12 ;could go directly to generalScore and remove the next 3 lines
+   744: 	
+   745: 000110   27BB  clr r27 ;clear the timer for the transition
+   746: 000111   E026  ldi r18, 6 ;change state to transition
+   747: 000112   E00C  ldi r16, 12 ;after that, change state to generalScore
+   748: 000113   E0A1  ldi r26, 1 ;finally, it will be stackerInit
+   749: 	
+   750: 000114   C029  rjmp statesEnd
+   751: 	
+   752:  stackerFellGameContinue:
+   753: 000115   D088  rcall fallScreen
+   754: 	
+   755: 	;on every other one, go backwards
+   756: 000116   FF10  sbrs r17, 0   ;if bit 0 of the score is 1
+   757: 000117   C004  rjmp stackerFellBackwards
+   758: 000118   6140  sbr r20, 0x10 ;set the top left LED to be on
+   759: 000119   95A2  swap r26      ;move the row to the left side
+   760: 00011A   E0C1  ldi r28, 1    ;set the motion direction to be >>
+   761: 00011B   C006  rjmp stackerFellBackwardsAfter
+   762: 	
+   763:  stackerFellBackwards:
+   764: 00011C   E0C0  ldi r28, 0    ;set the motion direction to be <<
+   765: 00011D   6170  sbr r23, 0x10 ;set the top right LED to be on
+   766: 	;shift the 111, 011, or 001 to be 111, 110, or 100
+   767: 00011E   FFA2  sbrs r26, 2 ;if the 2nd bit is 0
+   768: 00011F   0FAA  lsl r26     ;shift left
+   769: 000120   FFA2  sbrs r26, 2 ;if the 2nd bit is 0
+   770: 000121   0FAA  lsl r26     ;shift left
+   771: 	
+   772:  stackerFellBackwardsAfter:
+   773: 	
+   774: 000122   2799  clr r25 ;clear the loop counter for consistent movement
+   775: 000123   D0AC  rcall incScore ;increment the score
+   776: 	
+   777: 000124   E02B  ldi r18, 11 ;change state to stackerMove
+   778: 	
+   779: 000125   2FE1  mov r30, r17
+   780: 000126   50E3  subi r30, 3 ;if score < 3
+   781: 000127   F408  brsh stackerFellAfterExtraDelay
+   782: 000128   95BA  dec r27 ;decrease the delay
+   783:  stackerFellAfterExtraDelay:
+   784: 000129   2FE1  mov r30, r17
+   785: 00012A   50E9  subi r30, 9 ;if score < 9
+   786: 00012B   F408  brsh stackerFellAfterExtraDelay2
+   787: 00012C   95BA  dec r27 ;decrease the delay
+   788:  stackerFellAfterExtraDelay2:
+   789: 00012D   50E2  subi r30, 2 ;if score-9 == 2 (aka score == 11)
+   790: 00012E   F409  brne stackerFellAfterExtraDelay3
+   791: 00012F   95BA  dec r27 ;decrease the delay
+   792:  stackerFellAfterExtraDelay3:
+   793: 000130   50E3  subi r30, 3 ;if score-9-2 == 3 (aka score == 14)
+   794: 000131   F461  brne statesEnd
+   795: 000132   95BA  dec r27 ;decrease the delay
+   796: 	
+   797: 000133   C00A  rjmp statesEnd
+   798: 	
+   799: generalScore:
+   800: 000134   2FE1  mov r30, r17
+   801: 000135   D075  rcall showScore
+   802: 000136   7F3E  cbr r19, 0b0000_0001 ;disregard S
+   803: 000137   5030  subi r19, 0 ;if any button was pressed
+   804: 000138   F029  breq statesEnd
+   805: 	
+   806: 	;either L or R was pressed
+   807: 000139   27BB  clr r27	;clear the timer for the transition state
+   808: 00013A   E026  ldi r18, 6 ;change state to transition
+   809: 00013B   2F0A  mov r16, r26 ;after that the state will be whatever was given unless
+   810: 00013C   FD32  sbrc r19, 2 ;if L was just pressed
+   811: 00013D   E000  ldi r16, 0 ;after that the state will be gameSelect
+   812: 	
+   813: 	
+   814: statesEnd:
+   815: 	;;; UPDATE IO ;;;
+   816: 	
+   817: 	
+   818: 00013E   2F38  mov r19, r24 ;copy current button values to know prev for edge detection
+   819: 00013F   7F88  cbr r24, 0b0000_0111 ;clear the button state bits
+   820: 000140   E0D4  ldi r29, 0b0000_0100 ;bit mask for PB2 (L button) and r24 button states
+   821: 	;will be shifted right to get PB1, then PB0, and to write to a different r24 bit
+   822: 
+   823: buttonLoop:
+   824: 000141   B9D1  out DDRB, r29 ;set the current pin to output
+   825: 000142   E0E0  ldi r30, 0x00
+   826: 000143   B9E2  out PORTB, r30 ;set all pins low
+   827: 000144   D048  rcall buttonDelay
+   828: 000145   9B03  sbis PINB, PB3 ;skip the next line if PB3 is 1
+   829: 000146   2B8D  or r24, r29 ;set the button's bit to 1
+   830: 
+   831: 000147   95D6  lsr r29 ;shift the bitmask to set a different pin as an output
+   832: 000148   50D0  subi r29, 0 ;check if the shift fell off the end, which means we are done
+   833: 000149   F7B9  brne buttonLoop ;keep going until no pin is selected
+   834: 	
+   835: 	;button edge detection (just pressed)
+   836: 	;just = !prev && curr
+   837: 	;r19 = !r19 & r24L
+   838: 	
+   839: 00014A   9530  com r19 ;invert all bits to create !prev instead of prev
+   840: 00014B   2338  and r19, r24 ;preform the "and" to get "just pressed"
+   841: 00014C   7037  cbr r19, 0b1111_1000 ;clear the unused bits in r19 for predictability
+   842: 	
+   843: 	;0,0
+   844: 00014D   2FE4  mov r30, r20 ;copy the LED's register to r30
+   845: 00014E   95E2  swap r30 ;swap the low and high nybble
+   846: 00014F   E0FC  ldi r31, 1<<PB3 | 1<<PB2 ;indicate the outputs
+   847: 000150   E0D4  ldi r29, 1<<PB2 ;indicate which outputs should be high
+   848: 000151   D028  rcall led
+   849: 
+   850: 	;0,1
+   851: 000152   2FE4  mov r30, r20 ;copy the LED's register to r30
+   852: 000153   E0FA  ldi r31, 1<<PB3 | 1<<PB1 ;indicate the outputs
+   853: 000154   E0D2  ldi r29, 1<<PB1 ;indicate which output should be high
+   854: 000155   D024  rcall led
+   855: 
+   856: 	;0,2
+   857: 000156   2FE5  mov r30, r21 ;copy the LED's register to r30
+   858: 000157   95E2  swap r30 ;swap the low and high nybble
+   859: 000158   E0F9  ldi r31, 1<<PB3 | 1<<PB0 ;indicate the outputs
+   860: 000159   E0D1  ldi r29, 1<<PB0 ;indicate which outputs should be high
+   861: 00015A   D01F  rcall led
+   862: 
+   863: 	;1,0
+   864: 00015B   2FE5  mov r30, r21 ;copy the LED's register to r30
+   865: 00015C   E0F6  ldi r31, 1<<PB1 | 1<<PB2 ;indicate the outputs
+   866: 00015D   E0D2  ldi r29, 1<<PB1 ;indicate which output should be high
+   867: 00015E   D01B  rcall led
+   868: 
+   869: 	;1,1
+   870: 00015F   2FE6  mov r30, r22 ;copy the LED's register to r30
+   871: 000160   95E2  swap r30 ;swap the low and high nybble
+   872: 000161   E0F6  ldi r31, 1<<PB1 | 1<<PB2 ;indicate the outputs
+   873: 000162   E0D4  ldi r29, 1<<PB2 ;indicate which outputs should be high
+   874: 000163   D016  rcall led
+   875: 
+   876: 	;1,2
+   877: 000164   2FE6  mov r30, r22 ;copy the LED's register to r30
+   878: 000165   E0F5  ldi r31, 1<<PB0 | 1<<PB2 ;indicate the outputs
+   879: 000166   E0D4  ldi r29, 1<<PB2 ;indicate which output should be high
+   880: 000167   D012  rcall led
+   881: 
+   882: 	;2,0
+   883: 000168   2FE7  mov r30, r23 ;copy the LED's register to r30
+   884: 000169   95E2  swap r30 ;swap the low and high nybble
+   885: 00016A   E0F5  ldi r31, 1<<PB0 | 1<<PB2 ;indicate the outputs
+   886: 00016B   E0D1  ldi r29, 1<<PB0 ;indicate which outputs should be high
+   887: 00016C   D00D  rcall led
+   888: 
+   889: 	;2,1
+   890: 00016D   2FE7  mov r30, r23 ;copy the LED's register to r30
+   891: 00016E   E0F3  ldi r31, 1<<PB0 | 1<<PB1 ;indicate the outputs
+   892: 00016F   E0D1  ldi r29, 1<<PB0 ;indicate which output should be high
+   893: 000170   D009  rcall led
+   894: 
+   895: 	;2,2
+   896: 000171   2FE8  mov r30, r24 ;copy the LED's register to r30
+   897: 000172   95E2  swap r30 ;swap the low and high nybble
+   898: 000173   E0F3  ldi r31, 1<<PB0 | 1<<PB1 ;indicate the outputs
+   899: 000174   E0D2  ldi r29, 1<<PB1 ;indicate which outputs should be high
+   900: 000175   D004  rcall led
+   901: 	
+   902: 	
+   903: 000176   E0E0  ldi r30, 0x00 ;set everything as inputs
+   904: 000177   B9E1  out DDRB, r30
+   905: 	
+   906: 000178   9593  inc r25 ;increment the loop counter
+   907: 000179   CE95  rjmp loop
+   908: 	
+   909: 	
+   910: 	;;; FUNCTIONS ;;;
+   911: 	
+   912: led:
+   913: 00017A   B9F1  out DDRB, r31 ;set the outputs
+   914: 00017B   E0F0  ldi r31, 0x00
+   915: 00017C   B9F2  out PORTB, r31 ;turn the LED off to start
+   916: 	
+   917: 	;r30 should be set up with the low nybble being the one to use, doing "swap" if needed
+   918: 	;if bit 0 is set, turn it on solid
+   919: 00017D   FDE0  sbrc r30, 0
+   920: 00017E   C005  rjmp ledOn
+   921: 	;if bit 1 is set, turn it dim
+   922: 00017F   FDE1  sbrc r30, 1
+   923: 000180   C006  rjmp ledDim
+   924: 	;if bit 2 is set, make it blink (otherwise turn it off
+   925: 000181   FDE2  sbrc r30, 2 ;this is skipping the next skip, therefore going to ledOff
+   926: ledBlink:
+   927: 000182   FD92  sbrc r25, 2 ;skip if a bit in the loop counter is cleared
+   928: 000183   C001  rjmp ledOff
+   929: 	
+   930: 	; bit   blinking speed
+   931: 	;  0 => 1/32 second cycle
+   932: 	;  1 => 1/16 second cycle
+   933: 	;  2 => 1/8 second cycle
+   934: 	;  3 => 1/4 second cycle
+   935: 	;  4 => 1/2 second cycle
+   936: 	;  5 => 1 second cycle
+   937: 	;  6 => 2 second cycle
+   938: 	;  7 => 4 second cycle
+   939: ledOn:
+   940: 	;r29 is which output to set to high
+   941: 000184   B9D2  out PORTB, r29 ;turn on the LED
+   942: ledOff:
+   943: 000185   D009  rcall ledDelay ;delay either way
+   944: 000186   9508  ret
+   945: ledDim:
+   946: 000187   D007  rcall ledDelay
+   947: 000188   B9D2  out PORTB, r29 ;turn on the LED
+   948: 000189   E4E0  ldi r30, 0x40
+   949: 00018A   E0F0  ldi r31, 0x00
+   950: 00018B   D005  rcall delayLoop
+   951: 00018C   9508  ret
+   952: 
+   953: 
+   954: 	
+   955: 	
+   956: 	
+   957: buttonDelay:
+   958: 00018D   E0FB  ldi r31, 0x0b ;lower starts to not work
+   959: 00018E   C001  rjmp delay
+   960: 
+   961: ledDelay:
+   962: 00018F   E0F8  ldi r31, 0x08
+   963: ;;;	rjmp delay
+   964: 
+   965: delay:
+   966: 000190   EFEF  ldi r30, 0xff
+   967: delayLoop:
+   968: 000191   50E1  subi r30, 1 ; subtract 1
+   969: 000192   40F0  sbci r31, 0 ; if r30 was 0, subtract 1
+   970: 000193   F7E9  brne delayLoop ; while r31 is not 0, loop
+   971: 000194   9508  ret
+   972: 
+   973: ;;; x=0x40 (r30)
+   974: ;;; y=0x00 (r31)
+   975: ;;; 
+   976: ;;; while (true) {
+   977: ;;;   x--
+   978: ;;;   if (x == 0xff) {
+   979: ;;;     y--
+   980: ;;;     if (y == 0xff) {
+   981: ;;;       break;
+   982: ;;;     }
+   983: ;;;   }
+   984: ;;; }
+   985: 
+   986: 
+   987: fillScreen:
+   988: 000195   2F54  mov r21, r20
+   989: helpFillScreen:
+   990: 000196   2F64  mov r22, r20
+   991: 000197   2F75  mov r23, r21
+   992: 000198   9572  swap r23
+   993: 000199   708F  cbr r24, 0xf0 ;clear high nybble without disrupting low nybble (buttons)
+   994: 00019A   9508  ret
+   995: 	
+   996: clearScreen:
+   997: 00019B   2744  clr r20
+   998: 00019C   DFF8  rcall fillScreen
+   999: 00019D   9508  ret
+  1000: 	
+  1001: ;maskLowAndSwap:
+  1002: ;	andi r30, 0x0f ;get only the low nybble
+  1003: ;	swap ;move the low nybble to the high one
+  1004: ;	ret
+  1005: 	
+  1006: fallScreen:
+  1007: 	;shift all pixels on the screen down by 1, replacing the top row with blank
+  1008: 	;NOTE: only works for solidly on pixels, not blinking or dim
+  1009: 	
+  1010: 	;copy the middle row to the bottom (preserving the top, but not the middle)
+  1011: 	;r21H <- r20L   0,2 <- 0,1
+  1012: ;	cbr r21, 0xf0  ;clear r21H (the destination)
+  1013: ;	mov r30, r20   ;copy r20 so we can modify it
+  1014: ;	andi r30, 0x0f ;get only r20L
+  1015: ;	swap r30       ;move r20L to r30H
+  1016: ;	or r21, r30    ;copy what was r20L to r21H
+  1017: 00019E   FB40  bst r20, 0 ;copy from LED(0,1) into T
+  1018: 00019F   F954  bld r21, 4 ;copy T into LED(0,2) 
+  1019: 	
+  1020: 	;r22L <- r22H   1,2 <- 1,1
+  1021: 0001A0   9562  swap r22       ;just swap the nybbles (messing up the middle, but it's OK)
+  1022: 	
+  1023: 	;r24H <- r23L   2,2 <- 2,1
+  1024: ;	cbr r24, 0xf0  ;clear r24H (the destination)
+  1025: ;	mov r30, r23   ;copy r23 so we can modify it
+  1026: ;	andi r30, 0x0f ;get only r23L
+  1027: ;	swap r30       ;move r23L to r30H
+  1028: ;	or r24, r30    ;copy what was r23L to r24H
+  1029: 0001A1   FB70  bst r23, 0 ;copy from LED(2,1) into T
+  1030: 0001A2   F984  bld r24, 4 ;copy T into LED(2,2) 
+  1031: 	
+  1032: 	
+  1033: 	;copy the top row to the middle (preserving the bottom, but not the top)
+  1034: 	;r20L <- r20H   0,1 <- 0,0
+  1035: 0001A3   9542  swap r20       ;just swap the nybbles (messing up the top, but it's OK)
+  1036: 	
+  1037: 	;r22H <- r21L   1,1 <- 1,0
+  1038: ;	cbr r22, 0xf0  ;clear r22H (the destination)
+  1039: ;	mov r30, r21   ;copy r21 so we can modify it
+  1040: ;	andi r30, 0x0f ;get only r21L
+  1041: ;	swap r30       ;move r21L to r30H
+  1042: ;	or r22, r30    ;copy what was r21L to r22H
+  1043: 0001A4   FB50  bst r21, 0 ;copy from LED(1,0) into T
+  1044: 0001A5   F964  bld r22, 4 ;copy T into LED(1,1) 
+  1045: 	
+  1046: 	;r23L <- r23H   2,1 <- 2,0
+  1047: 0001A6   9572  swap r23       ;just swap the nybbles (messing up the top, but it's OK)
+  1048: 	
+  1049: 	;falling thru to the next function is intentional
+  1050: clearTopRow:
+  1051: 	;clear the top row
+  1052: 0001A7   704F  cbr r20, 0xf0  ;clear 0,0
+  1053: 0001A8   7F50  cbr r21, 0x0f  ;clear 1,0
+  1054: 0001A9   707F  cbr r23, 0xf0  ;clear 2,0
+  1055: 	
+  1056: 0001AA   9508  ret
+  1057: 	
+  1058: 	
+  1059: 	; dice/score display
+  1060: 	;
+  1061: 	; A    B    C    D    E    F    G    H    I
+  1062: 	; r20H r20L r21H r21L r22H r22L r23H r23L r24H
+  1063: 	;
+  1064: 	;           0xABC_DEF_GHI
+  1065: 	; 0 0b00000 0x000_000_000
+  1066: 	; 1 0b00001 0x000_010_000
+  1067: 	; 2 0b00010 0x100_000_001
+  1068: 	; 3 0b00011 0x100_010_001
+  1069: 	; 4 0b00100 0x101_000_101
+  1070: 	; 5 0b00101 0x101_010_101
+  1071: 	; 6 0b00110 0x111_000_111
+  1072: 	; 7 0b00111 0x111_010_111
+  1073: 	; 8 0b01000 0x111_101_111
+  1074: 	; 9 0b01001 0x111_111_111
+  1075: 	;
+  1076: 	;A = bit 0 of score
+  1077: 	;B = score >= 2
+  1078: 	;C = score >= 4
+  1079: 	;D = score >= 6
+  1080: 	;E = score >= 8
+  1081: 	;
+  1082: 	;           0xBDC_EAE_CDB
+  1083: 	;
+  1084: 	;10 0b01010 0x000_100_000
+  1085: 	;11 0b01011 0x010_000_000
+  1086: 	;12 0b01100 0x010_100_000
+  1087: 	;13 0b01101 0x000_001_000
+  1088: 	;14 0b01110 0x000_101_000
+  1089: 	;15 0b01111 0x010_001_000
+  1090: 	;16 0b10000 0x010_101_000
+  1091: 	;17 0b10001 0x000_000_010
+  1092: 	;18 0b10010 0x000_100_010
+  1093: 	;19 0b10011 0x010_000_010
+  1094: 	;20 0b10100 0x010_100_010
+  1095: 	;21 0b10101 0x000_001_010
+  1096: 	;22 0b10110 0x000_101_010
+  1097: 	;23 0b10111 0x010_001_010
+  1098: 	;24 0b11000 0x010_101_010
+  1099: 	;25+        0x010_111_010
+  1100: 	;
+  1101: 	;if score > 25, set score to 25
+  1102: 	;0bDCBA = bits of (score-9)
+  1103: 	;E = score >= 25 (aka score-9 >= 16)
+  1104: 	;
+  1105: 	;           0x0A0_BEC_0D0
+  1106: 
+  1107: showScore:
+  1108: 0001AB   DFEF  rcall clearScreen
+  1109: 	
+  1110: 	;r30 is the score
+  1111: 	;push r30
+  1112: 0001AC   50EA  subi r30, 10 ;if score >= 10
+  1113: 0001AD   F4A0  brsh scoreMore ;holy BRSH! go to the higher number scores
+  1114: 0001AE   5FE6  subi r30, -10 ;add the 10 back
+  1115: 	
+  1116: 0001AF   FDE0  sbrc r30, 0 ;if bit 0 in the score is 1
+  1117: 0001B0   6160  sbr r22, 0x10 ;led(1,1) = 1
+  1118: 	
+  1119: 0001B1   50E2  subi r30, 2
+  1120: 0001B2   F0E0  brlo scoreDone
+  1121: 	; if score >= 2
+  1122: 0001B3   6140  sbr r20, 0x10 ;led(0,0) = 1
+  1123: 0001B4   6180  sbr r24, 0x10 ;led(2,2) = 1
+  1124: 	
+  1125: 0001B5   50E2  subi r30, 2
+  1126: 0001B6   F0C0  brlo scoreDone
+  1127: 	; if score >= 4
+  1128: 0001B7   6150  sbr r21, 0x10 ;led(0,2) = 1
+  1129: 0001B8   6170  sbr r23, 0x10 ;led(2,0) = 1
+  1130: 	
+  1131: 0001B9   50E2  subi r30, 2
+  1132: 0001BA   F0A0  brlo scoreDone
+  1133: 	; if score >= 6
+  1134: 0001BB   6041  sbr r20, 0x01 ;led(0,1) = 1
+  1135: 0001BC   6071  sbr r23, 0x01 ;led(2,1) = 1
+  1136: 	
+  1137: 0001BD   50E2  subi r30, 2
+  1138: 0001BE   F080  brlo scoreDone
+  1139: 	; if score >= 8
+  1140: 0001BF   6051  sbr r21, 0x01 ;led(1,0) = 1
+  1141: 0001C0   6061  sbr r22, 0x01 ;led(1,2) = 1
+  1142: 	
+  1143: 0001C1   C00D  rjmp scoreDone
+  1144: 	
+  1145: scoreMore:
+  1146: 	;r30 starts as score-10
+  1147: 0001C2   50EF  subi r30, 15 ;if score-10 < 15 aka if score < 25
+  1148: 0001C3   F010  brlo score24
+  1149: 0001C4   6160  sbr r22, 0x10 ;led(1,1) = 1
+  1150: 0001C5   EFEF  ldi r30, -1 ;set score-25 to -1, aka score = 24
+  1151: 	
+  1152: score24:
+  1153: 	;r30 starts as score-25
+  1154: 0001C6   5FE0  subi r30, -16 ;r30 is now score-9
+  1155: 	
+  1156: 0001C7   FDE0  sbrc r30, 0 ;if bit 0 is set
+  1157: 0001C8   6051  sbr r21, 0x01 ;led(1,0) = 1
+  1158: 	
+  1159: 0001C9   FDE1  sbrc r30, 1 ;if bit 1 is set
+  1160: 0001CA   6041  sbr r20, 0x01 ;led(0,1) = 1
+  1161: 	
+  1162: 0001CB   FDE2  sbrc r30, 2 ;if bit 2 is set
+  1163: 0001CC   6061  sbr r22, 0x01 ;led(1,2) = 1
+  1164: 	
+  1165: 0001CD   FDE3  sbrc r30, 3 ;if bit 3 is set
+  1166: 0001CE   6071  sbr r23, 0x01 ;led(2,1) = 1
+  1167: 	
+  1168: scoreDone:
+  1169: 	;pop r30
+  1170: 0001CF   9508  ret
+  1171: 	
+  1172: 	
+  1173: incScore:
+  1174: 0001D0   FF17  sbrs r17, 7 ;if the score is already 128, no need to increase
+  1175: 0001D1   9513  inc r17
+  1176: 0001D2   9508  ret
+  1177: 	
+  1178: randomSeed:
+  1179: 	;this will be called automatically the first time "random" is called
+  1180: 0001D3   6088  sbr r24, 0b0000_1000 ;mark that it has been seeded
+  1181: 	
+  1182: ;	ldi r25, 255 ;testing
+  1183: ;	ldi r25, 0 ;testing
+  1184: 	
+  1185: 0001D4   9593  inc r25 ;if r25 was 255 (now 0)
+  1186: 0001D5   F409  brne randomSeedNot255
+  1187: 0001D6   9593  inc r25 ;add 1 (now 1)
+  1188:  randomSeedNot255:
+  1189: 0001D7   959A  dec r25 ;(now 0 to 254)
+  1190: 	
+  1191: ;	ldi r25, 255 ;testing
+  1192: ;	ldi r25, 0 ;testing
+  1193: 0001D8   A990  sts RNG, r25 ;copy the loop counter to the RNG memory location
+  1194: 	
+  1195: random:
+  1196: 	;generates a random number from 0 to 254 into r30
+  1197: 	;when called for the first time, seeds the generator with r25 (loop counter)
+  1198: 	
+  1199: 0001D9   FF83  sbrs r24, 3 ;if the generator has not been seeded yet
+  1200: 0001DA   CFF8  rjmp randomSeed ;seed the generator
+  1201: 	
+  1202: 	;use a linear feedback shift register (LFSR) algorithm to scramble it
+  1203: 	
+  1204: 	;https://aloriumtech.com/project/random-number-generator/
+  1205: 	;https://aloriumtech.com/wp-content/uploads/2019/09/lfsr-768x322.jpg
+  1206: 	;
+  1207: 	; [7]-[6]-[5]-[4]-[3]-[2]-[1]-[0]<--
+  1208: 	;  |       |   |   |   ___         |
+  1209: 	;  |       |   |   ---)   \        |
+  1210: 	;  |       |   -------)XNOR\.______|
+  1211: 	;  |       -----------)    /
+  1212: 	;  -------------------)___/
+  1213: 	
+  1214: 0001DB   A1E0  lds r30, RNG ;load the RNG value from memory
+  1215: 0001DC   2FFE  mov r31, r30 ;r30 and r31 are both RNG
+  1216: 0001DD   0FEE  lsl r30
+  1217: 0001DE   0FEE  lsl r30 ;bit 7 of r30 is bit 5 of RNG
+  1218: 0001DF   27FE  eor r31, r30 ;xor bits 7^5 of RNG into bit 7 of r31
+  1219: 0001E0   0FEE  lsl r30 ;bit 7 of r30 is bit 4 of RNG
+  1220: 0001E1   27FE  eor r31, r30 ;xor bits 7^5^4 of RNG into bit 7 of r31
+  1221: 0001E2   0FEE  lsl r30 ;bit 7 of r30 is bit 3 of RNG
+  1222: 0001E3   27FE  eor r31, r30 ;xor bits 7^5^4^3 of RNG into bit 7 of r31
+  1223: 0001E4   95F0  com r31 ;invert to get the XNOR instead of XOR effect
+  1224: 	
+  1225: 0001E5   A1E0  lds r30, RNG ;load the RNG value from memory
+  1226: 0001E6   1FFF  rol r31 ;put bit 7 of r30 into the carry flag
+  1227: 0001E7   1FEE  rol r30 ;put the carry flag into bit 0 of r30 and shift the rest left
+  1228: 0001E8   A9E0  sts RNG, r30 ;store the new value back to memory
+  1229: 	
+  1230: 0001E9   2FFE  mov r31, r30 ;copy the full value to r31, r30 will be the mod6 value
+  1231: 	;falling thru to the next function is intentional
+  1232: mod6:
+  1233: 0001EA   50E6  subi r30, 6
+  1234: 0001EB   F7F0  brsh mod6
+  1235: 0001EC   5FEA  subi r30, -6
+  1236: 0001ED   9508  ret
+  1237: 	
+  1238: 	
+  1239: randomLED:
+  1240: 0001EE   DFAC  rcall clearScreen
+  1241: 0001EF   DFE9  rcall random ;get a random number from 0 to 254
+  1242: ;	rcall mod6 ;take the remainder when dividing by 6, so 0 to 5
+  1243: ;	lsr r30 ;divide by 2, so 0 to 2
+  1244: 	
+  1245: 	; 0  1  2  3  4  5
+  1246: 0001F0   50E2  subi r30, 2
+  1247: 	;-2 -1  0  1  2  3
+  1248: 0001F1   F028  brlo randomLED1
+  1249: 0001F2   50E2  subi r30, 2
+  1250: 	;      -2 -1  0  1
+  1251: 0001F3   F030  brlo randomLED2
+  1252: 	
+  1253: ;	dec r30
+  1254: ;	breq randomLED1
+  1255: ;	dec r30
+  1256: ;	breq randomLED2
+  1257: 	
+  1258:  randomLED0:
+  1259: 0001F4   6140  sbr r20, 0x10 ;turn on LED(0,0)
+  1260: 0001F5   E0C4  ldi r28, 0b100 ;the bitmask for L
+  1261: 0001F6   9508  ret
+  1262: 	
+  1263:  randomLED1:
+  1264: 0001F7   6170  sbr r23, 0x10 ;turn on LED(2,0)
+  1265: 0001F8   E0C2  ldi r28, 0b010 ;the bitmask for R
+  1266: 0001F9   9508  ret
+  1267: 	
+  1268:  randomLED2:
+  1269: 0001FA   6180  sbr r24, 0x10 ;turn on LED(2,2) sbr to not override button states
+  1270: 0001FB   E0C1  ldi r28, 0b001 ;the bitmask for S
+  1271: 0001FC   9508  ret
+  1272: 	
+  1273: 	
+  1274: 	
+ -> Warning 001: 3 symbol(s) defined, but not used!
+
+Program             :      509 words.
+Constants           :        0 words.
+Total program memory:      509 words.
+Eeprom space        :        0 bytes.
+Data segment        :        0 bytes.
+Compilation completed, no errors.
+Compilation ended 18.01.2022, 16:38:02
