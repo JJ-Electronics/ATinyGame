@@ -337,7 +337,7 @@ reactionPress:
 	clr r27 ;clear the timer for the transition
 	ldi r18, 6 ;change state to transition
 	ldi r16, 12 ;after that, change state to generalScore
-	ldi r26, 2 ;finally, it will be memoryInit
+	ldi r26, 2 ;finally, it will be reactionInit
 	
 	rjmp statesEnd
 	
