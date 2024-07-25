@@ -1,8 +1,8 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; written by Johan Vandegriff  ;
-; https://johanv.xyz/ATinyGame ;
-; ATTINY9             Dec 2021 ;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; made by Johan Vandegriff ;
+; https://jjv.sh/atinygame ;
+; ATTINY9         Dec 2021 ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .include "tn9def.inc"
 
@@ -160,41 +160,36 @@
 	; blinking between dim and bright
 	;   possibly implement fading as this but fast and with many levels?
 	
-	; TODO
+	
+	;;; TODO ;;;
+	
+	; FEATURES
 	; +button edge detection
 	; +dice/score display
 	; +pseudorandom generator
 	; +dice roll "game"
 	; +stacker game
 	; +game select
-	; +transition
+	; +screen transition state
 	; +whack-a-mole game
 	; +memory game
-	; reaction time game
+	; +reaction time game
 	; racing game
 	; tic-tac-toe
 	; blackjack 13
 	; maze game
 	
-	; can vary the delay time for transition for free by ldi r25 instead of clr r25
-	; +check for overflow on the scores for each game and cap at 128
-
-	; check for golfing in:
-	; stacker
-	; dice/score display
-	; dice roller
-	; whackamole
-	; memory
-	; helper states: gameSelect,transition,generalScore,shortDelay
-	; helper functions: led,fallScreen,showScore,randomLED
-	
-	; graphics demo?
+	; MORE IDEAS
 	; sleep to save battery?
+	; vcc level monitoring for low battery detection?
+	; implement LED fading?
+	; graphics demo?
 	; button just released?
 	; button debouncing?
-	; implement LED fading?
+	; could vary the delay time for transition for free by ldi r25 instead of clr r25
+	; +check for overflow when incrementing each game's score and cap at 128
 	
-	; TODO to make the program smaller
+	; CODE GOLFING TO DECREASE PROGRAM SIZE
 	; +14 combine into 1 game select state
 	; +2 combine static and moving bar
 	; +3 combine delay states into 1 with a signal of what state to go to next
@@ -217,7 +212,15 @@
 	; +2 rearrange register so don't have to push/pop r18, r29 is a new tmp var
 	; +1 rearrange stacker delay decrease logic
 	; +2 random also does mod6
-	;TOTAL GOLFED: +101
+	; +1 jump directly from stackerInit to stackerMove
+	; +1 jump directly from stackerMove to stackerFall
+	; +1 optimize randomLED
+	; +1 can skip a skip instead of skipping a jump in led
+	; +9 used bst and bld to simplify fallScreen
+	;TOTAL GOLFED: +118
+	;
+	; use more bst and bld (e.g. in stacker blinking animation)
+	; find ways to use more RAM and decrease program size
 	
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -264,22 +267,20 @@ gameSelect:
 	sbrc r19, 2 ;if L was just pressed
 	dec r16 ;decrement the selected game
 	subi r16, 0 ;if r16 == 0
-	breq gameSelectInc ;r16++
+	breq gameSelectInc ;if r16 == 0: r16++
 	
 	sbrc r19, 1 ;if R was just pressed
  gameSelectInc:
 	inc r16 ;increment the selected game
 	
-	;check if r16 == 6 and set it to 5
 	mov r30, r16
 	subi r30, 6
-	brne gameSelectNoDec
-	
+	brne gameSelectNoDec ;if r16 == 6: r16--
 	dec r16
  gameSelectNoDec:
 	
 	
-	;limit to 7 maximum	
+	;limit to 7 maximum and loop around
 ;	andi r16, 0b111
 ;	subi r16, 0 ;if r16 == 0
 ;	breq gameSelectInc ;r16++
@@ -336,7 +337,7 @@ reactionPress:
 	clr r27 ;clear the timer for the transition
 	ldi r18, 6 ;change state to transition
 	ldi r16, 12 ;after that, change state to generalScore
-	ldi r26, 2 ;finally, it will be memoryInit
+	ldi r26, 2 ;finally, it will be reactionInit
 	
 	rjmp statesEnd
 	
@@ -529,13 +530,12 @@ stackerInit:
 	
 	ldi r18, 11 ;change state to stackerMove
 	
-	rjmp statesEnd
+	;fall thru to the next state on purpose
+;	rjmp statesEnd
 
 stackerMove:
 	sbrc r19, 0 ;if S was just pressed, run the next line
-	ldi r18, 13 ;change state to stackerFall
-	sbrc r19, 0 ;if S was just pressed, run the next line
-	rjmp statesEnd
+	rjmp stackerFall
 	
 	mov r30, r25
 	sub r30, r27 ;check if the delay has elapsed yet
@@ -585,6 +585,7 @@ stackerMove:
 	
 	
 stackerFall:
+	ldi r18, 13 ;make sure to change state to stackerFall since it jumped here
 	;save the screen for later so it isn't ruined by the animations
 	;push r20
 	;push r21
@@ -712,9 +713,9 @@ stackerFell:
 	
 	
 	;get rid of the blinking on the 2nd row from the falling animation
-	cbr r20, 0b0000_0100 ;clear LED(0,1)'s "blinking bit"
-	cbr r22, 0b0100_0000 ;clear LED(1,1)'s "blinking bit"
-	cbr r23, 0b0000_0100 ;clear LED(2,1)'s "blinking bit"
+	cbr r20, 0b0000_0100 ;clear LED(0,1)'s "blinking" bit
+	cbr r22, 0b0100_0000 ;clear LED(1,1)'s "blinking" bit
+	cbr r23, 0b0000_0100 ;clear LED(2,1)'s "blinking" bit
 	
 	clr r26 ;reset the moving bar
 	
@@ -803,15 +804,17 @@ generalScore:
 	breq statesEnd
 	
 	;either L or R was pressed
-	ldi r18, 6 ;change state to transition
-	ldi r16, 0 ;after that the state will be gameSelect
-	sbrc r19, 1 ;if R was just pressed
-	mov r16, r26 ;after that the state will be whatever was given
 	clr r27	;clear the timer for the transition state
+	ldi r18, 6 ;change state to transition
+	mov r16, r26 ;after that the state will be whatever was given unless
+	sbrc r19, 2 ;if L was just pressed
+	ldi r16, 0 ;after that the state will be gameSelect
 	
 	
 statesEnd:
 	;;; UPDATE IO ;;;
+	
+	
 	mov r19, r24 ;copy current button values to know prev for edge detection
 	cbr r24, 0b0000_0111 ;clear the button state bits
 	ldi r29, 0b0000_0100 ;bit mask for PB2 (L button) and r24 button states
@@ -905,7 +908,7 @@ buttonLoop:
 	
 	
 	;;; FUNCTIONS ;;;
-
+	
 led:
 	out DDRB, r31 ;set the outputs
 	ldi r31, 0x00
@@ -918,22 +921,21 @@ led:
 	;if bit 1 is set, turn it dim
 	sbrc r30, 1
 	rjmp ledDim
-	;if bit 2 is set, make it blink
-	sbrs r30, 2
-	rjmp ledOff
-	
-	; blinking speeds
-	; 0 => 1/32 second cycle
-	; 1 => 1/16 second cycle
-	; 2 => 1/8 second cycle
-	; 3 => 1/4 second cycle
-	; 4 => 1/2 second cycle
-	; 5 => 1 second cycle
-	; 6 => 2 second cycle
-	; 7 => 4 second cycle
+	;if bit 2 is set, make it blink (otherwise turn it off
+	sbrc r30, 2 ;this is skipping the next skip, therefore going to ledOff
 ledBlink:
 	sbrc r25, 2 ;skip if a bit in the loop counter is cleared
 	rjmp ledOff
+	
+	; bit   blinking speed
+	;  0 => 1/32 second cycle
+	;  1 => 1/16 second cycle
+	;  2 => 1/8 second cycle
+	;  3 => 1/4 second cycle
+	;  4 => 1/2 second cycle
+	;  5 => 1 second cycle
+	;  6 => 2 second cycle
+	;  7 => 4 second cycle
 ledOn:
 	;r29 is which output to set to high
 	out PORTB, r29 ;turn on the LED
@@ -1003,39 +1005,46 @@ clearScreen:
 	
 fallScreen:
 	;shift all pixels on the screen down by 1, replacing the top row with blank
+	;NOTE: only works for solidly on pixels, not blinking or dim
 	
 	;copy the middle row to the bottom (preserving the top, but not the middle)
 	;r21H <- r20L   0,2 <- 0,1
-	cbr r21, 0xf0  ;clear r21H (the destination)
-	mov r30, r20   ;copy r20 so we can modify it
-	andi r30, 0x0f ;get only r20L
-	swap r30       ;move r20L to r30H
-	or r21, r30    ;copy what was r20L to r21H
+;	cbr r21, 0xf0  ;clear r21H (the destination)
+;	mov r30, r20   ;copy r20 so we can modify it
+;	andi r30, 0x0f ;get only r20L
+;	swap r30       ;move r20L to r30H
+;	or r21, r30    ;copy what was r20L to r21H
+	bst r20, 0 ;copy from LED(0,1) into T
+	bld r21, 4 ;copy T into LED(0,2) 
 	
 	;r22L <- r22H   1,2 <- 1,1
 	swap r22       ;just swap the nybbles (messing up the middle, but it's OK)
 	
 	;r24H <- r23L   2,2 <- 2,1
-	cbr r24, 0xf0  ;clear r24H (the destination)
-;TODO	mov r30, r23   ;copy r23 so we can modify it
-;TODO	andi r30, 0x0f ;get only r23L
-;TODO	swap r30       ;move r23L to r30H
-;TODO	or r24, r30    ;copy what was r23L to r24H
+;	cbr r24, 0xf0  ;clear r24H (the destination)
+;	mov r30, r23   ;copy r23 so we can modify it
+;	andi r30, 0x0f ;get only r23L
+;	swap r30       ;move r23L to r30H
+;	or r24, r30    ;copy what was r23L to r24H
+	bst r23, 0 ;copy from LED(2,1) into T
+	bld r24, 4 ;copy T into LED(2,2) 
 	
 	
 	;copy the top row to the middle (preserving the bottom, but not the top)
 	;r20L <- r20H   0,1 <- 0,0
-;TODO	swap r20       ;just swap the nybbles (messing up the top, but it's OK)
+	swap r20       ;just swap the nybbles (messing up the top, but it's OK)
 	
 	;r22H <- r21L   1,1 <- 1,0
-;TODO	cbr r22, 0xf0  ;clear r22H (the destination)
-;TODO	mov r30, r21   ;copy r21 so we can modify it
-;TODO	andi r30, 0x0f ;get only r21L
-;TODO	swap r30       ;move r21L to r30H
-;TODO	or r22, r30    ;copy what was r21L to r22H
+;	cbr r22, 0xf0  ;clear r22H (the destination)
+;	mov r30, r21   ;copy r21 so we can modify it
+;	andi r30, 0x0f ;get only r21L
+;	swap r30       ;move r21L to r30H
+;	or r22, r30    ;copy what was r21L to r22H
+	bst r21, 0 ;copy from LED(1,0) into T
+	bld r22, 4 ;copy T into LED(1,1) 
 	
 	;r23L <- r23H   2,1 <- 2,0
-;TODO	swap r23       ;just swap the nybbles (messing up the top, but it's OK)
+	swap r23       ;just swap the nybbles (messing up the top, but it's OK)
 	
 	;falling thru to the next function is intentional
 clearTopRow:
@@ -1231,12 +1240,20 @@ randomLED:
 	rcall clearScreen
 	rcall random ;get a random number from 0 to 254
 ;	rcall mod6 ;take the remainder when dividing by 6, so 0 to 5
-	lsr r30 ;divide by 2, so 0 to 2
+;	lsr r30 ;divide by 2, so 0 to 2
 	
-	dec r30
-	breq randomLED1
-	dec r30
-	breq randomLED2
+	; 0  1  2  3  4  5
+	subi r30, 2
+	;-2 -1  0  1  2  3
+	brlo randomLED1
+	subi r30, 2
+	;      -2 -1  0  1
+	brlo randomLED2
+	
+;	dec r30
+;	breq randomLED1
+;	dec r30
+;	breq randomLED2
 	
  randomLED0:
 	sbr r20, 0x10 ;turn on LED(0,0)

@@ -1,19 +1,19 @@
 gavrasm Gerd's AVR assembler version 5.0 (C)2021 by DG4FAC
 ----------------------------------------------------------
-Source file: ATinyGame5.asm
-Hex file:    ATinyGame5.hex
-Eeprom file: ATinyGame5.eep
+Source file: ATinyGame.asm
+Hex file:    ATinyGame.hex
+Eeprom file: ATinyGame.eep
 Compiled:    18.01.2022, 16:38:02
 Pass:        2
-     1: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-     2: ; written by Johan Vandegriff  ;
-     3: ; https://johanv.xyz/ATinyGame ;
-     4: ; ATTINY9             Dec 2021 ;
-     5: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     1: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+     2: ; made by Johan Vandegriff ;
+     3: ; https://jjv.sh/atinygame ;
+     4: ; ATTINY9         Dec 2021 ;
+     5: ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
      6: 
      7: .include "tn9def.inc"
  -> Warning 009: Include defs not necessary, using internal values!
-   File: ATinyGame5.asm, Line: 7
+   File: ATinyGame.asm, Line: 7
    Source line: .include "tn9def.inc"
      8: 
      9: .CSEG ; code section
