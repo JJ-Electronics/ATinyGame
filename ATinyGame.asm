@@ -86,27 +86,27 @@
 	
 	
 	; buttons
-	;   r24 0b!!!!_NLRS
-	;         7654_3210
+	;   r24 0b!!!!NLRS
+	;         76543210
 	;
-	; 0 = S 0b0000_0001 is pressed
-	; 1 = R 0b0000_0010 is pressed
-	; 2 = L 0b0000_0100 is pressed
-	; 3 = N 0b0000_1000 has random number generator been initialized
+	; 0 = S 0b00000001 is pressed
+	; 1 = R 0b00000010 is pressed
+	; 2 = L 0b00000100 is pressed
+	; 3 = N 0b00001000 has random number generator been initialized
 	; note that the high nybble is used for an LED
 	
 	;set the buttons to "pressed" so if you start it while holding a button
 	;you have to release it and press it again, which might help the RNG seeding?
-	ldi r24, 0b0000_0111
+	ldi r24, 0b00000111
 	
 	
 	; button edge detection
-	;   r19 0b0000_0LRS
-	;         7654_3210
+	;   r19 0b00000LRS
+	;         76543210
 	;
-	; 0 = S 0b0000_0001 just pressed
-	; 1 = R 0b0000_0010 just pressed
-	; 2 = L 0b0000_0100 just pressed
+	; 0 = S 0b00000001 just pressed
+	; 1 = R 0b00000010 just pressed
+	; 2 = L 0b00000100 just pressed
 	
 	clr r19 ;clear the just pressed states
 	
@@ -465,7 +465,7 @@ whackamoleWhileAnyPressed:
 	
 ;whileAnyPressed:
 	mov r30, r24
-	cbr r30, 0b1111_1000
+	cbr r30, 0b11111000
 	subi r30, 0 ;if any button is pressed
 	brne statesEnd2 ;do nothing
 	;otherwise:
@@ -477,17 +477,27 @@ diceRoller:
 	;rcall clearScreen ;clear the screen
 	
 	sbrc r19, 2 ;if L was just pressed, run the next line
-	ldi r18, 6 ;change state to transition
-	ldi r16, 0 ;after that the state will be gameSelect
-	clr r27	;clear the timer for the transition state
-	
+	ldi r18, 0 ;change state to gameSelect
+	;ldi r18, 6 ;change state to transition
+	;ldi r16, 0 ;after that the state will be gameSelect
+	;clr r27	;clear the timer for the transition state
+
 	rcall random ;get a random number from 0 to 254
 ;	rcall mod6 ;take the remainder when dividing by 6, so 0 to 5
 	inc r30 ;add 1, so 1 to 6
 	
-	sbrc r19, 1 ;if R just pressed, skip next line
+	sbrc r24, 1 ;if R is pressed, run next line
+	ldi r27, 0b00100000 ;start the rolling animation over
+
+	;hijack the transition timer to do the rolling animation
+	;note: r27 starts out as 0b00100000 because the transition state just exited
+	sbrs r27, 5 ;skip if bit 5 in the timer is 1, but it starts at 1 (will be 0 in 1/2 second)
+	rjmp statesEnd ;stop rolling
+	inc r27 ;increment the timer
+
+	sbrs r25, 0 ;only display every other frame
 	rcall showScore ;display it as a dice number on the LEDs
-	
+
 	rjmp statesEnd
 	
 stackerInit:
@@ -713,9 +723,9 @@ stackerFell:
 	
 	
 	;get rid of the blinking on the 2nd row from the falling animation
-	cbr r20, 0b0000_0100 ;clear LED(0,1)'s "blinking" bit
-	cbr r22, 0b0100_0000 ;clear LED(1,1)'s "blinking" bit
-	cbr r23, 0b0000_0100 ;clear LED(2,1)'s "blinking" bit
+	cbr r20, 0b00000100 ;clear LED(0,1)'s "blinking" bit
+	cbr r22, 0b01000000 ;clear LED(1,1)'s "blinking" bit
+	cbr r23, 0b00000100 ;clear LED(2,1)'s "blinking" bit
 	
 	clr r26 ;reset the moving bar
 	
@@ -799,7 +809,7 @@ stackerFell:
 generalScore:
 	mov r30, r17
 	rcall showScore
-	cbr r19, 0b0000_0001 ;disregard S
+	cbr r19, 0b00000001 ;disregard S
 	subi r19, 0 ;if any button was pressed
 	breq statesEnd
 	
@@ -816,8 +826,8 @@ statesEnd:
 	
 	
 	mov r19, r24 ;copy current button values to know prev for edge detection
-	cbr r24, 0b0000_0111 ;clear the button state bits
-	ldi r29, 0b0000_0100 ;bit mask for PB2 (L button) and r24 button states
+	cbr r24, 0b00000111 ;clear the button state bits
+	ldi r29, 0b00000100 ;bit mask for PB2 (L button) and r24 button states
 	;will be shifted right to get PB1, then PB0, and to write to a different r24 bit
 
 buttonLoop:
@@ -838,7 +848,7 @@ buttonLoop:
 	
 	com r19 ;invert all bits to create !prev instead of prev
 	and r19, r24 ;preform the "and" to get "just pressed"
-	cbr r19, 0b1111_1000 ;clear the unused bits in r19 for predictability
+	cbr r19, 0b11111000 ;clear the unused bits in r19 for predictability
 	
 	;0,0
 	mov r30, r20 ;copy the LED's register to r30
@@ -1177,7 +1187,7 @@ incScore:
 	
 randomSeed:
 	;this will be called automatically the first time "random" is called
-	sbr r24, 0b0000_1000 ;mark that it has been seeded
+	sbr r24, 0b00001000 ;mark that it has been seeded
 	
 ;	ldi r25, 255 ;testing
 ;	ldi r25, 0 ;testing

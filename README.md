@@ -8,7 +8,10 @@ See [jjv.sh/atinygame](https://jjv.sh/atinygame) for more info.
 - [ATinyGame.lst](ATinyGame.lst) - The code parsed to resolve labels into concrete memory addresses.
 - [ATinyGame.hex](ATinyGame.hex) - The final machine code (with checksums) to be sent over serial to the programmer board, which will flash the ATtiny9.
 
-## Programmer
+## Modifying the Code
+If you want to modify the code, edit [ATinyGame.asm](ATinyGame.asm), then run `./assemble.sh` to assemble it, which outputs the `ATinyGame.hex` file. See [the ATtiny9 datasheet](https://ww1.microchip.com/downloads/en/DeviceDoc/atmel-8127-avr-8-bit-microcontroller-attiny4-attiny5-attiny9-attiny10_datasheet.pdf) around page 195 for a list of the assembly instructions and what they do.
+
+## Programmer Board
 The programmer board uses an Arduino to flash code to the ATtiny9 over SPI. Build this circuit, only making the orange part if you want to be able to program the games more than once (see the "Reprogramming" section for more info):
 
 ![programmer board circuit diagram](circuit.jpg)
