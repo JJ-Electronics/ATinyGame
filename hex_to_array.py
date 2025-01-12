@@ -4,7 +4,7 @@ import sys
 def hex_to_c_array(hex_file_path):
     try:
         with open(hex_file_path, 'r') as hex_file:
-            print("const uint8_t hardcodedProgramData[] = {")
+            print("const uint8_t hardcodedProgramData[] PROGMEM = {")
             for line in hex_file:
                 # Skip lines that don't start with ':'
                 if not line.startswith(':'):
