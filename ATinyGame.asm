@@ -30,7 +30,7 @@
 	out CLKPSR, r30 ; sets the clock divider
 	
 	; nop for sync
-	nop
+	; nop
 	
 	; REGISTERS
 	; r16 gameSelect idx; transition/shortDelay/whackamoleWhileAnyPressed next state
@@ -45,7 +45,7 @@
 	; r25 loop counter
 	; r26 generalScore next state; memory saved RNG; stacker moving bar
 	; r27 transition timer; memory sequence idx; whackamole timer; stacker delay
-	; r28 randomLED bitmask; stacker direction of motion
+	; r28 randomLED bitmask; stacker direction of motion; diceRoller timer
 	; r29 system tmp; unused in game logic (could use to save space?)
 	; r30 system/game tmp; function arg/return; random value 0-5
 	; r31 system/game tmp; function arg/return; random value 0-254
@@ -108,7 +108,7 @@
 	; 1 = R 0b00000010 just pressed
 	; 2 = L 0b00000100 just pressed
 	
-	clr r19 ;clear the just pressed states
+	; clr r19 ;clear the just pressed states (no need, registers start out as 0)
 	
 	
 	; LED grid (L = low nybble, H = high nybble):
@@ -217,7 +217,9 @@
 	; +1 optimize randomLED
 	; +1 can skip a skip instead of skipping a jump in led
 	; +9 used bst and bld to simplify fallScreen
-	;TOTAL GOLFED: +118
+	; +2 don't need to set things to 0
+	; +1 don't need nop at the start
+	;TOTAL GOLFED: +121
 	;
 	; use more bst and bld (e.g. in stacker blinking animation)
 	; find ways to use more RAM and decrease program size
@@ -303,6 +305,7 @@ transition:
 	
 	mov r18, r16 ;move to whatever next state was specified in r16
 	ldi r16, 1 ;set r16 to 1 in case we are going back to gameSelect
+	clr r28 ;clear animation timer in case we are going to diceRoller
 	rcall clearScreen ;clear the screen to prepare for the next state
 	
 	rjmp statesEnd
@@ -477,23 +480,23 @@ diceRoller:
 	;rcall clearScreen ;clear the screen
 	
 	sbrc r19, 2 ;if L was just pressed, run the next line
-	ldi r18, 0 ;change state to gameSelect
-	;ldi r18, 6 ;change state to transition
-	;ldi r16, 0 ;after that the state will be gameSelect
-	;clr r27	;clear the timer for the transition state
+	; ldi r18, 0 ;change state to gameSelect
+	ldi r18, 6 ;change state to transition
+	ldi r16, 0 ;after that the state will be gameSelect
+	clr r27	;clear the timer for the transition state
 
 	rcall random ;get a random number from 0 to 254
 ;	rcall mod6 ;take the remainder when dividing by 6, so 0 to 5
 	inc r30 ;add 1, so 1 to 6
 	
 	sbrc r24, 1 ;if R is pressed, run next line
-	ldi r27, 0b00100000 ;start the rolling animation over
+	clr r28 ;start the rolling animation over
 
 	;hijack the transition timer to do the rolling animation
 	;note: r27 starts out as 0b00100000 because the transition state just exited
-	sbrs r27, 5 ;skip if bit 5 in the timer is 1, but it starts at 1 (will be 0 in 1/2 second)
+	sbrc r28, 5 ;skip if bit 5 in the timer is 0, (it starts at 0, will be 1 in 1/2 sec)
 	rjmp statesEnd ;stop rolling
-	inc r27 ;increment the timer
+	inc r28 ;increment the timer
 
 	sbrs r25, 0 ;only display every other frame
 	rcall showScore ;display it as a dice number on the LEDs
@@ -809,7 +812,7 @@ stackerFell:
 generalScore:
 	mov r30, r17
 	rcall showScore
-	cbr r19, 0b00000001 ;disregard S
+	cbr r19, 0b11111001 ;disregard S (clear everything except R and L)
 	subi r19, 0 ;if any button was pressed
 	breq statesEnd
 	
@@ -848,7 +851,7 @@ buttonLoop:
 	
 	com r19 ;invert all bits to create !prev instead of prev
 	and r19, r24 ;preform the "and" to get "just pressed"
-	cbr r19, 0b11111000 ;clear the unused bits in r19 for predictability
+	; cbr r19, 0b11111000 ;clear the unused bits in r19 for predictability (don't need, accounted for by expecting them to be random)
 	
 	;0,0
 	mov r30, r20 ;copy the LED's register to r30

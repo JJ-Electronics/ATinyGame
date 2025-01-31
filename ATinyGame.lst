@@ -1,5 +1,5 @@
 
-AVRA   Ver. 1.4.2 ATinyGame.asm Sun Jan 12 01:19:33 2025
+AVRA   Ver. 1.4.2 ATinyGame.asm Thu Jan 30 21:13:09 2025
 
 
          ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -410,7 +410,7 @@ C:000006 bffc      	out CCP, r31 ; Configuration Change Protection, allows prote
 C:000007 bfe6      	out CLKPSR, r30 ; sets the clock divider
          	
          	; nop for sync
-C:000008 0000      	nop
+         	; nop
          	
          	; REGISTERS
          	; r16 gameSelect idx; transition/shortDelay/whackamoleWhileAnyPressed next state
@@ -425,7 +425,7 @@ C:000008 0000      	nop
          	; r25 loop counter
          	; r26 generalScore next state; memory saved RNG; stacker moving bar
          	; r27 transition timer; memory sequence idx; whackamole timer; stacker delay
-         	; r28 randomLED bitmask; stacker direction of motion
+         	; r28 randomLED bitmask; stacker direction of motion; diceRoller timer
          	; r29 system tmp; unused in game logic (could use to save space?)
          	; r30 system/game tmp; function arg/return; random value 0-5
          	; r31 system/game tmp; function arg/return; random value 0-254
@@ -477,7 +477,7 @@ C:000008 0000      	nop
          	
          	;set the buttons to "pressed" so if you start it while holding a button
          	;you have to release it and press it again, which might help the RNG seeding?
-C:000009 e087      	ldi r24, 0b00000111
+C:000008 e087      	ldi r24, 0b00000111
          	
          	
          	; button edge detection
@@ -488,7 +488,7 @@ C:000009 e087      	ldi r24, 0b00000111
          	; 1 = R 0b00000010 just pressed
          	; 2 = L 0b00000100 just pressed
          	
-C:00000a 2733      	clr r19 ;clear the just pressed states
+         	; clr r19 ;clear the just pressed states (no need, registers start out as 0)
          	
          	
          	; LED grid (L = low nybble, H = high nybble):
@@ -498,13 +498,13 @@ C:00000a 2733      	clr r19 ;clear the just pressed states
          	; r20L r22H r23L   0,1 1,1 2,1
          	; r21H r22L r24H   0,2 1,2 2,2
          	
-C:00000b d192      	rcall clearScreen
+C:000009 d194      	rcall clearScreen
          	
          	; r25 will be a loop counter used for:
          	;   LED effect calculations
          	;   random number seeding
          	;   timing events (under 4 seconds)
-C:00000c 2799      	clr r25 ;one cycle through the 256 values = 4 seconds, so 64 frames/sec
+C:00000a 2799      	clr r25 ;one cycle through the 256 values = 4 seconds, so 64 frames/sec
          	
          	; each LED has 4 bits, which are used for a one-hot code
          	; val  state
@@ -597,7 +597,9 @@ C:00000c 2799      	clr r25 ;one cycle through the 256 values = 4 seconds, so 64
          	; +1 optimize randomLED
          	; +1 can skip a skip instead of skipping a jump in led
          	; +9 used bst and bld to simplify fallScreen
-         	;TOTAL GOLFED: +118
+         	; +2 don't need to set things to 0
+         	; +1 don't need nop at the start
+         	;TOTAL GOLFED: +121
          	;
          	; use more bst and bld (e.g. in stacker blinking animation)
          	; find ways to use more RAM and decrease program size
@@ -606,57 +608,57 @@ C:00000c 2799      	clr r25 ;one cycle through the 256 values = 4 seconds, so 64
          ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
          
          	;;; GAME LOGIC ;;;
-C:00000d e026      	ldi r18, 6 ;current state starts at transition
-C:00000e e000      	ldi r16, 0 ;then it will go to gameSelect
+C:00000b e026      	ldi r18, 6 ;current state starts at transition
+C:00000c e000      	ldi r16, 0 ;then it will go to gameSelect
           loop:
          	;check the state
          	
-C:00000f e1e3      	ldi r30, PC+4 ;4 is the number of lines after this one to jump to for state 0
-C:000010 0fe2      	add r30, r18 ;plus r18 (the current state)
-C:000011 e0f0      	ldi r31, 0 ;high byte = 0 since we are (hopefully) in the first 256 instructions
-C:000012 9409      	ijmp ;copy Z (r30 & r31) to PC, which jumps
+C:00000d e1e1      	ldi r30, PC+4 ;4 is the number of lines after this one to jump to for state 0
+C:00000e 0fe2      	add r30, r18 ;plus r18 (the current state)
+C:00000f e0f0      	ldi r31, 0 ;high byte = 0 since we are (hopefully) in the first 256 instructions
+C:000010 9409      	ijmp ;copy Z (r30 & r31) to PC, which jumps
          	
-C:000013 c014      	rjmp gameSelect ;state 0
-C:000014 c09f      	rjmp stackerInit ;state 1
-C:000015 c02c      	rjmp reactionInit ;state 2
-C:000016 c040      	rjmp memoryInit ;state 3
-C:000017 c06e      	rjmp whackamoleInit ;state 4
-C:000018 c08f      	rjmp diceRoller ;state 5
-C:000019 c01e      	rjmp transition ;state 6
-C:00001a c044      	rjmp memoryShow ;state 7
-C:00001b c052      	rjmp memoryPress ;state 8
-C:00001c c06d      	rjmp whackamoleMole ;state 9
-C:00001d c06e      	rjmp whackamoleWait ;state 10
-C:00001e c09f      	rjmp stackerMove ;state 11
-C:00001f c117      	rjmp generalScore ;state 12
-C:000020 c0b7      	rjmp stackerFall ;state 13
-C:000021 c0cd      	rjmp shortDelay ;state 14
-C:000022 c0cf      	rjmp stackerFall2 ;state 15
-C:000023 c07c      	rjmp whackamoleWhileAnyPressed ;state 16
-C:000024 c03f      	rjmp memoryShowBetween ;state 17
-C:000025 c0dd      	rjmp stackerFell ;state 18
-C:000026 c01f      	rjmp reactionWait ;state 19
-C:000027 c024      	rjmp reactionPress ;state 20
+C:000011 c014      	rjmp gameSelect ;state 0
+C:000012 c0a2      	rjmp stackerInit ;state 1
+C:000013 c02d      	rjmp reactionInit ;state 2
+C:000014 c041      	rjmp memoryInit ;state 3
+C:000015 c06f      	rjmp whackamoleInit ;state 4
+C:000016 c090      	rjmp diceRoller ;state 5
+C:000017 c01e      	rjmp transition ;state 6
+C:000018 c045      	rjmp memoryShow ;state 7
+C:000019 c053      	rjmp memoryPress ;state 8
+C:00001a c06e      	rjmp whackamoleMole ;state 9
+C:00001b c06f      	rjmp whackamoleWait ;state 10
+C:00001c c0a2      	rjmp stackerMove ;state 11
+C:00001d c11a      	rjmp generalScore ;state 12
+C:00001e c0ba      	rjmp stackerFall ;state 13
+C:00001f c0d0      	rjmp shortDelay ;state 14
+C:000020 c0d2      	rjmp stackerFall2 ;state 15
+C:000021 c07d      	rjmp whackamoleWhileAnyPressed ;state 16
+C:000022 c040      	rjmp memoryShowBetween ;state 17
+C:000023 c0e0      	rjmp stackerFell ;state 18
+C:000024 c020      	rjmp reactionWait ;state 19
+C:000025 c025      	rjmp reactionPress ;state 20
          	
           gameSelect:
-C:000028 2fe0      	mov r30, r16
-C:000029 d184      	rcall showScore
+C:000026 2fe0      	mov r30, r16
+C:000027 d186      	rcall showScore
          	
-C:00002a 27bb      	clr r27 ;clear the timer for the transition
+C:000028 27bb      	clr r27 ;clear the timer for the transition
          	
-C:00002b fd32      	sbrc r19, 2 ;if L was just pressed
-C:00002c 950a      	dec r16 ;decrement the selected game
-C:00002d 5000      	subi r16, 0 ;if r16 == 0
-C:00002e f009      	breq gameSelectInc ;if r16 == 0: r16++
+C:000029 fd32      	sbrc r19, 2 ;if L was just pressed
+C:00002a 950a      	dec r16 ;decrement the selected game
+C:00002b 5000      	subi r16, 0 ;if r16 == 0
+C:00002c f009      	breq gameSelectInc ;if r16 == 0: r16++
          	
-C:00002f fd31      	sbrc r19, 1 ;if R was just pressed
+C:00002d fd31      	sbrc r19, 1 ;if R was just pressed
            gameSelectInc:
-C:000030 9503      	inc r16 ;increment the selected game
+C:00002e 9503      	inc r16 ;increment the selected game
          	
-C:000031 2fe0      	mov r30, r16
-C:000032 50e6      	subi r30, 6
-C:000033 f409      	brne gameSelectNoDec ;if r16 == 6: r16--
-C:000034 950a      	dec r16
+C:00002f 2fe0      	mov r30, r16
+C:000030 50e6      	subi r30, 6
+C:000031 f409      	brne gameSelectNoDec ;if r16 == 6: r16--
+C:000032 950a      	dec r16
            gameSelectNoDec:
          	
          	
@@ -665,233 +667,234 @@ C:000034 950a      	dec r16
          ;	subi r16, 0 ;if r16 == 0
          ;	breq gameSelectInc ;r16++
          	
-C:000035 fd30      	sbrc r19, 0 ;if S was just pressed
-C:000036 e026      	ldi r18, 6 ;change state to transition
+C:000033 fd30      	sbrc r19, 0 ;if S was just pressed
+C:000034 e026      	ldi r18, 6 ;change state to transition
          	;it will go to the selected game next
          	
-C:000037 c109      	rjmp statesEnd
+C:000035 c10c      	rjmp statesEnd
          	
           transition:
          	;show dim lights
-C:000038 e242      	ldi r20, 0x22
-C:000039 d15e      	rcall fillScreen
-C:00003a 6280      	sbr r24, 0x20 ;avoid messing up the seeding and buttons
+C:000036 e242      	ldi r20, 0x22
+C:000037 d160      	rcall fillScreen
+C:000038 6280      	sbr r24, 0x20 ;avoid messing up the seeding and buttons
          	
-C:00003b 95b3      	inc r27 ;increment the timer
-C:00003c ffb5      	sbrs r27, 5 ;if bit 5 in the timer is 1 (it has been 1/2 second)
-C:00003d c103      	rjmp statesEnd
+C:000039 95b3      	inc r27 ;increment the timer
+C:00003a ffb5      	sbrs r27, 5 ;if bit 5 in the timer is 1 (it has been 1/2 second)
+C:00003b c106      	rjmp statesEnd
          	
-C:00003e 2f20      	mov r18, r16 ;move to whatever next state was specified in r16
-C:00003f e001      	ldi r16, 1 ;set r16 to 1 in case we are going back to gameSelect
-C:000040 d15d      	rcall clearScreen ;clear the screen to prepare for the next state
+C:00003c 2f20      	mov r18, r16 ;move to whatever next state was specified in r16
+C:00003d e001      	ldi r16, 1 ;set r16 to 1 in case we are going back to gameSelect
+C:00003e 27cc      	clr r28 ;clear animation timer in case we are going to diceRoller
+C:00003f d15e      	rcall clearScreen ;clear the screen to prepare for the next state
          	
-C:000041 c0ff      	rjmp statesEnd
+C:000040 c101      	rjmp statesEnd
          	
           reactionInit:
-C:000042 d199      	rcall random
-C:000043 2f9f      	mov r25, r31
-C:000044 e123      	ldi r18, 19 ;change state to reactionWait
-C:000045 c0fb      	rjmp statesEnd
+C:000041 d19a      	rcall random
+C:000042 2f9f      	mov r25, r31
+C:000043 e123      	ldi r18, 19 ;change state to reactionWait
+C:000044 c0fd      	rjmp statesEnd
          	
           reactionWait:
-C:000046 5090      	subi r25, 0 ;if the random timer is up
-C:000047 f419      	brne reactionWaitEnd
+C:000045 5090      	subi r25, 0 ;if the random timer is up
+C:000046 f419      	brne reactionWaitEnd
          	
-C:000048 6160      	sbr r22, 0x10 ;turn on LED(1,1)
+C:000047 6160      	sbr r22, 0x10 ;turn on LED(1,1)
          	
-C:000049 e411      	ldi r17, 65 ;allow 1 second to press it
-C:00004a e124      	ldi r18, 20 ;change state to reactionPress
+C:000048 e411      	ldi r17, 65 ;allow 1 second to press it
+C:000049 e124      	ldi r18, 20 ;change state to reactionPress
            reactionWaitEnd:
-C:00004b c0f5      	rjmp statesEnd
+C:00004a c0f7      	rjmp statesEnd
          	
           reactionPress:
-C:00004c 951a      	dec r17 ;decrease the score
-C:00004d f011      	breq reactionPressGameOver ;if the score is 0 (4 sec has passed), end the game
-C:00004e ff30      	sbrs r19, 0 ;if S pressed
-C:00004f c0f1      	rjmp statesEnd
+C:00004b 951a      	dec r17 ;decrease the score
+C:00004c f011      	breq reactionPressGameOver ;if the score is 0 (4 sec has passed), end the game
+C:00004d ff30      	sbrs r19, 0 ;if S pressed
+C:00004e c0f3      	rjmp statesEnd
          
            reactionPressGameOver:
          	
+C:00004f 9516      	lsr r17 ;divide score by 2
 C:000050 9516      	lsr r17 ;divide score by 2
-C:000051 9516      	lsr r17 ;divide score by 2
-C:000052 27bb      	clr r27 ;clear the timer for the transition
-C:000053 e026      	ldi r18, 6 ;change state to transition
-C:000054 e00c      	ldi r16, 12 ;after that, change state to generalScore
-C:000055 e0a2      	ldi r26, 2 ;finally, it will be reactionInit
+C:000051 27bb      	clr r27 ;clear the timer for the transition
+C:000052 e026      	ldi r18, 6 ;change state to transition
+C:000053 e00c      	ldi r16, 12 ;after that, change state to generalScore
+C:000054 e0a2      	ldi r26, 2 ;finally, it will be reactionInit
          	
-C:000056 c0ea      	rjmp statesEnd
+C:000055 c0ec      	rjmp statesEnd
          	
           memoryInit:
-C:000057 d184      	rcall random ;make sure the RNG is seeded, now we can use r25 after
-C:000058 2faf      	mov r26, r31 ;store the first number in the sequence so it can be recreated
+C:000056 d185      	rcall random ;make sure the RNG is seeded, now we can use r25 after
+C:000057 2faf      	mov r26, r31 ;store the first number in the sequence so it can be recreated
          	
-C:000059 e011      	ldi r17, 1 ;the score (length of the memory sequence)
+C:000058 e011      	ldi r17, 1 ;the score (length of the memory sequence)
          	;it is 1 higher than the actual number of presses
-C:00005a e0b1      	ldi r27, 1 ;the number of items left in the current sequence
+C:000059 e0b1      	ldi r27, 1 ;the number of items left in the current sequence
          	
-C:00005b 2799      	clr r25 ;reset the timer
-C:00005c e02e      	ldi r18, 14 ;change state to shortDelay
-C:00005d e007      	ldi r16, 7 ;then change state to memoryShow
-C:00005e c0e2      	rjmp statesEnd
+C:00005a 2799      	clr r25 ;reset the timer
+C:00005b e02e      	ldi r18, 14 ;change state to shortDelay
+C:00005c e007      	ldi r16, 7 ;then change state to memoryShow
+C:00005d c0e4      	rjmp statesEnd
          	
           memoryShow:
-C:00005f d191      	rcall randomLED
-C:000060 2799      	clr r25 ;reset the timer
-C:000061 e02e      	ldi r18, 14 ;change state to shortDelay
-C:000062 e101      	ldi r16, 17 ;then change state to memoryShowBetween
-C:000063 c0dd      	rjmp statesEnd
+C:00005e d192      	rcall randomLED
+C:00005f 2799      	clr r25 ;reset the timer
+C:000060 e02e      	ldi r18, 14 ;change state to shortDelay
+C:000061 e101      	ldi r16, 17 ;then change state to memoryShowBetween
+C:000062 c0df      	rjmp statesEnd
          
           memoryShowBetween:
-C:000064 2799      	clr r25 ;reset the timer
-C:000065 e02e      	ldi r18, 14 ;change state to shortDelay
-C:000066 e007      	ldi r16, 7 ;then change state to memoryShow
+C:000063 2799      	clr r25 ;reset the timer
+C:000064 e02e      	ldi r18, 14 ;change state to shortDelay
+C:000065 e007      	ldi r16, 7 ;then change state to memoryShow
          	
-C:000067 d136      	rcall clearScreen
+C:000066 d137      	rcall clearScreen
          	
-C:000068 95ba      	dec r27 ;decrement sequence index
-C:000069 f419      	brne memoryShowBetweenEnd ;if the sequence is done showing
+C:000067 95ba      	dec r27 ;decrement sequence index
+C:000068 f419      	brne memoryShowBetweenEnd ;if the sequence is done showing
          	
-C:00006a a9a0      	sts RNG, r26 ;store the original random value back to the RNG to start over
-C:00006b 2fb1      	mov r27, r17 ;reset the sequence index to the sequence length (score)
-C:00006c e028      	ldi r18, 8 ;change state to memoryPress
+C:000069 a9a0      	sts RNG, r26 ;store the original random value back to the RNG to start over
+C:00006a 2fb1      	mov r27, r17 ;reset the sequence index to the sequence length (score)
+C:00006b e028      	ldi r18, 8 ;change state to memoryPress
          	
           memoryShowBetweenEnd:
-C:00006d c0d3      	rjmp statesEnd
+C:00006c c0d5      	rjmp statesEnd
          	
           memoryPress:
-C:00006e 5030      	subi r19, 0
-C:00006f f061      	breq memoryPressEnd ;if any button was just pressed:
+C:00006d 5030      	subi r19, 0
+C:00006e f061      	breq memoryPressEnd ;if any button was just pressed:
          	
-C:000070 d180      	rcall randomLED ;puts the button mask into r28
-C:000071 d12c      	rcall clearScreen
+C:00006f d181      	rcall randomLED ;puts the button mask into r28
+C:000070 d12d      	rcall clearScreen
          	
-C:000072 23c3      	and r28, r19 ;see if the correct button was just pressed
-C:000073 f049      	breq memoryPressGameOver
+C:000071 23c3      	and r28, r19 ;see if the correct button was just pressed
+C:000072 f049      	breq memoryPressGameOver
          		
-C:000074 95ba      	dec r27 ;decrement sequence index
-C:000075 f431      	brne memoryPressEnd ;if the sequence is done being entered
+C:000073 95ba      	dec r27 ;decrement sequence index
+C:000074 f431      	brne memoryPressEnd ;if the sequence is done being entered
          	
-C:000076 a9a0      	sts RNG, r26 ;store the original random value back to the RNG to start over
-C:000077 2799      	clr r25 ;reset the timer
-C:000078 e02e      	ldi r18, 14 ;change state to shortDelay
-C:000079 e007      	ldi r16, 7 ;then change state to memoryShow
-C:00007a d158      	rcall incScore ;increase the score by 1 (the sequence length will also increase)
-C:00007b 2fb1      	mov r27, r17 ;reset the sequence index to the sequence length (score)
+C:000075 a9a0      	sts RNG, r26 ;store the original random value back to the RNG to start over
+C:000076 2799      	clr r25 ;reset the timer
+C:000077 e02e      	ldi r18, 14 ;change state to shortDelay
+C:000078 e007      	ldi r16, 7 ;then change state to memoryShow
+C:000079 d159      	rcall incScore ;increase the score by 1 (the sequence length will also increase)
+C:00007a 2fb1      	mov r27, r17 ;reset the sequence index to the sequence length (score)
          
            memoryPressEnd:
-C:00007c c0c4      	rjmp statesEnd
+C:00007b c0c6      	rjmp statesEnd
          	
            memoryPressGameOver:
           	;exhaust the rest of the RNG sequence
-C:00007d d15e      	rcall random
-C:00007e 95ba       	dec r27
-C:00007f f7e9       	brne memoryPressGameOver
+C:00007c d15f      	rcall random
+C:00007d 95ba       	dec r27
+C:00007e f7e9       	brne memoryPressGameOver
           	
          ;	dec r17 ;decrease the score by 1 to account for the extra one at the start
-C:000080 9516      	lsr r17 ;divide score by 2
-C:000081 27bb      	clr r27 ;clear the timer for the transition
-C:000082 e026      	ldi r18, 6 ;change state to transition
-C:000083 e00c      	ldi r16, 12 ;after that, change state to generalScore
-C:000084 e0a3      	ldi r26, 3 ;finally, it will be memoryInit
-C:000085 c0bb      	rjmp statesEnd
+C:00007f 9516      	lsr r17 ;divide score by 2
+C:000080 27bb      	clr r27 ;clear the timer for the transition
+C:000081 e026      	ldi r18, 6 ;change state to transition
+C:000082 e00c      	ldi r16, 12 ;after that, change state to generalScore
+C:000083 e0a3      	ldi r26, 3 ;finally, it will be memoryInit
+C:000084 c0bd      	rjmp statesEnd
          	
           whackamoleInit:
-C:000086 27bb      	clr r27 ;clear the loop counter, when it reaches 255 (4 sec) the game is over
-C:000087 e010      	ldi r17, 0 ;score (number of moles hit)
+C:000085 27bb      	clr r27 ;clear the loop counter, when it reaches 255 (4 sec) the game is over
+C:000086 e010      	ldi r17, 0 ;score (number of moles hit)
          
-C:000088 e029      	ldi r18, 9 ;change state to whackamoleMole
-C:000089 c0b7      	rjmp statesEnd
+C:000087 e029      	ldi r18, 9 ;change state to whackamoleMole
+C:000088 c0b9      	rjmp statesEnd
          	
           whackamoleMole:
-C:00008a e02a      	ldi r18, 10 ;change state to whackamoleWait
-C:00008b d165      	rcall randomLED
+C:000089 e02a      	ldi r18, 10 ;change state to whackamoleWait
+C:00008a d166      	rcall randomLED
          	
           whackamoleWait:
-C:00008c 95b3      	inc r27 ;increment the timer
-C:00008d f071      	breq whackamoleTimeUp
+C:00008b 95b3      	inc r27 ;increment the timer
+C:00008c f071      	breq whackamoleTimeUp
          	
            whackamoleWaitTimeLeft:
-C:00008e 5030      	subi r19, 0
-C:00008f f059      	breq whackamoleWaitingStill ;if any button was just pressed:
-C:000090 2fec      	mov r30, r28 ;copy the bitmask
-C:000091 23e3      	and r30, r19 ;see if the correct button was just pressed
-C:000092 f029      	breq whackamoleWaitWrongButton
-C:000093 d13f      	rcall incScore ;add 1 to the score
-C:000094 d109      	rcall clearScreen
-C:000095 e120      	ldi r18, 16 ;change state to whackamoleWhileAnyPressed
-C:000096 e009      	ldi r16, 9 ;after that, change state to whackamoleMole
-C:000097 c0a9      	rjmp statesEnd
+C:00008d 5030      	subi r19, 0
+C:00008e f059      	breq whackamoleWaitingStill ;if any button was just pressed:
+C:00008f 2fec      	mov r30, r28 ;copy the bitmask
+C:000090 23e3      	and r30, r19 ;see if the correct button was just pressed
+C:000091 f029      	breq whackamoleWaitWrongButton
+C:000092 d140      	rcall incScore ;add 1 to the score
+C:000093 d10a      	rcall clearScreen
+C:000094 e120      	ldi r18, 16 ;change state to whackamoleWhileAnyPressed
+C:000095 e009      	ldi r16, 9 ;after that, change state to whackamoleMole
+C:000096 c0ab      	rjmp statesEnd
          	
            whackamoleWaitWrongButton:
-C:000098 5010      	subi r17, 0 ;if score is already 0
-C:000099 f009      	breq whackamoleWaitingStill ;don't decrement
+C:000097 5010      	subi r17, 0 ;if score is already 0
+C:000098 f009      	breq whackamoleWaitingStill ;don't decrement
          	
-C:00009a 951a      	dec r17 ;decrease the score because the wrong button was pressed
+C:000099 951a      	dec r17 ;decrease the score because the wrong button was pressed
          	
            whackamoleWaitingStill:
-C:00009b c0a5      	rjmp statesEnd
+C:00009a c0a7      	rjmp statesEnd
          	
            whackamoleTimeUp:
          ;	lsr r17 ;divide score by 2
          	;timer is already cleared for the transition
-C:00009c e026      	ldi r18, 6 ;change state to transition
-C:00009d e00c      	ldi r16, 12 ;after that, change state to generalScore
-C:00009e e0a4      	ldi r26, 4 ;finally, it will be whackamoleInit
-C:00009f c0a1      	rjmp statesEnd
+C:00009b e026      	ldi r18, 6 ;change state to transition
+C:00009c e00c      	ldi r16, 12 ;after that, change state to generalScore
+C:00009d e0a4      	ldi r26, 4 ;finally, it will be whackamoleInit
+C:00009e c0a3      	rjmp statesEnd
          	
           whackamoleWhileAnyPressed:
-C:0000a0 95b3      	inc r27 ;increment the timer
-C:0000a1 f3d1      	breq whackamoleTimeUp
+C:00009f 95b3      	inc r27 ;increment the timer
+C:0000a0 f3d1      	breq whackamoleTimeUp
          	
          ;whileAnyPressed:
-C:0000a2 2fe8      	mov r30, r24
-C:0000a3 70e7      	cbr r30, 0b11111000
-C:0000a4 50e0      	subi r30, 0 ;if any button is pressed
-C:0000a5 f589      	brne statesEnd2 ;do nothing
+C:0000a1 2fe8      	mov r30, r24
+C:0000a2 70e7      	cbr r30, 0b11111000
+C:0000a3 50e0      	subi r30, 0 ;if any button is pressed
+C:0000a4 f599      	brne statesEnd2 ;do nothing
          	;otherwise:
-C:0000a6 2f20      	mov r18, r16 ;move to whatever next state was specified in r16
-C:0000a7 c099      	rjmp statesEnd
+C:0000a5 2f20      	mov r18, r16 ;move to whatever next state was specified in r16
+C:0000a6 c09b      	rjmp statesEnd
          	
           diceRoller:
          	;sbrc r19, 0 ;if S just pressed
          	;rcall clearScreen ;clear the screen
          	
-C:0000a8 fd32      	sbrc r19, 2 ;if L was just pressed, run the next line
-C:0000a9 e020      	ldi r18, 0 ;change state to gameSelect
-         	;ldi r18, 6 ;change state to transition
-         	;ldi r16, 0 ;after that the state will be gameSelect
-         	;clr r27	;clear the timer for the transition state
+C:0000a7 fd32      	sbrc r19, 2 ;if L was just pressed, run the next line
+         	; ldi r18, 0 ;change state to gameSelect
+C:0000a8 e026      	ldi r18, 6 ;change state to transition
+C:0000a9 e000      	ldi r16, 0 ;after that the state will be gameSelect
+C:0000aa 27bb      	clr r27	;clear the timer for the transition state
          
-C:0000aa d131      	rcall random ;get a random number from 0 to 254
+C:0000ab d130      	rcall random ;get a random number from 0 to 254
          ;	rcall mod6 ;take the remainder when dividing by 6, so 0 to 5
-C:0000ab 95e3      	inc r30 ;add 1, so 1 to 6
+C:0000ac 95e3      	inc r30 ;add 1, so 1 to 6
          	
-C:0000ac fd81      	sbrc r24, 1 ;if R is pressed, run next line
-C:0000ad e2b0      	ldi r27, 0b00100000 ;start the rolling animation over
+C:0000ad fd81      	sbrc r24, 1 ;if R is pressed, run next line
+C:0000ae 27cc      	clr r28 ;start the rolling animation over
          
          	;hijack the transition timer to do the rolling animation
          	;note: r27 starts out as 0b00100000 because the transition state just exited
-C:0000ae ffb5      	sbrs r27, 5 ;skip if bit 5 in the timer is 1, but it starts at 1 (will be 0 in 1/2 second)
-C:0000af c091      	rjmp statesEnd ;stop rolling
-C:0000b0 95b3      	inc r27 ;increment the timer
+C:0000af fdc5      	sbrc r28, 5 ;skip if bit 5 in the timer is 0, (it starts at 0, will be 1 in 1/2 sec)
+C:0000b0 c091      	rjmp statesEnd ;stop rolling
+C:0000b1 95c3      	inc r28 ;increment the timer
          
-C:0000b1 ff90      	sbrs r25, 0 ;only display every other frame
-C:0000b2 d0fb      	rcall showScore ;display it as a dice number on the LEDs
+C:0000b2 ff90      	sbrs r25, 0 ;only display every other frame
+C:0000b3 d0fa      	rcall showScore ;display it as a dice number on the LEDs
          
-C:0000b3 c08d      	rjmp statesEnd
+C:0000b4 c08d      	rjmp statesEnd
          	
           stackerInit:
          	;turn on the bottom 2 rows of LEDs, and the top left LED
-C:0000b4 e141      	ldi r20, 0x11
-C:0000b5 e150      	ldi r21, 0x10
-C:0000b6 d0e2      	rcall helpFillScreen
-C:0000b7 6180      	sbr r24, 0x10 ;avoid messing up the seeding and buttons
+C:0000b5 e141      	ldi r20, 0x11
+C:0000b6 e150      	ldi r21, 0x10
+C:0000b7 d0e1      	rcall helpFillScreen
+C:0000b8 6180      	sbr r24, 0x10 ;avoid messing up the seeding and buttons
          	
-C:0000b8 2799      	clr r25             ;clear the loop counter for consistent movement
-C:0000b9 e7a0      	ldi r26, 0b01110000 ;the moving top row
-C:0000ba e0c1      	ldi r28, 1          ;the direction of motion (1 = >>, 0 = <<)
-C:0000bb e0bd      	ldi r27, 13         ;the delay between movements (next: 13-2)
-C:0000bc e010      	ldi r17, 0          ;the score (number of times the button was pressed, minus 1)
+C:0000b9 2799      	clr r25             ;clear the loop counter for consistent movement
+C:0000ba e7a0      	ldi r26, 0b01110000 ;the moving top row
+C:0000bb e0c1      	ldi r28, 1          ;the direction of motion (1 = >>, 0 = <<)
+C:0000bc e0bd      	ldi r27, 13         ;the delay between movements (next: 13-2)
+C:0000bd e010      	ldi r17, 0          ;the score (number of times the button was pressed, minus 1)
          	
          	;score   1  2 3 4 5 6 7 8 9 a b c d e f
          	;delay 13,11,9,8,7,6,5,4,3,3,3,2,2,2,1,1,1,1,1,1,...
@@ -918,40 +921,40 @@ C:0000bc e010      	ldi r17, 0          ;the score (number of times the button w
          	; 1  3 00000100
          	;         |||
          	
-C:0000bd e02b      	ldi r18, 11 ;change state to stackerMove
+C:0000be e02b      	ldi r18, 11 ;change state to stackerMove
          	
          	;fall thru to the next state on purpose
          ;	rjmp statesEnd
          
           stackerMove:
-C:0000be fd30      	sbrc r19, 0 ;if S was just pressed, run the next line
-C:0000bf c018      	rjmp stackerFall
+C:0000bf fd30      	sbrc r19, 0 ;if S was just pressed, run the next line
+C:0000c0 c018      	rjmp stackerFall
          	
-C:0000c0 2fe9      	mov r30, r25
-C:0000c1 1beb      	sub r30, r27 ;check if the delay has elapsed yet
-C:0000c2 f4a1      	brne statesEnd2
-C:0000c3 2799      	clr r25
+C:0000c1 2fe9      	mov r30, r25
+C:0000c2 1beb      	sub r30, r27 ;check if the delay has elapsed yet
+C:0000c3 f4a1      	brne statesEnd2
+C:0000c4 2799      	clr r25
          	
          	
-C:0000c4 fdc0      	sbrc r28, 0 ;if r28 = 1 (moving right)
-C:0000c5 95a6      	lsr r26
+C:0000c5 fdc0      	sbrc r28, 0 ;if r28 = 1 (moving right)
+C:0000c6 95a6      	lsr r26
          	
-C:0000c6 ffc0      	sbrs r28, 0 ;if r28 = 0 (moving left)
-C:0000c7 0faa      	lsl r26
+C:0000c7 ffc0      	sbrs r28, 0 ;if r28 = 0 (moving left)
+C:0000c8 0faa      	lsl r26
          	
          	;bits 4, 3, and 2 of r26 are the top row
-C:0000c8 d0e1      	rcall clearTopRow
+C:0000c9 d0e0      	rcall clearTopRow
          		
-C:0000c9 fda4      	sbrc r26, 4   ;if bit 4 is set
-C:0000ca 6140      	sbr r20, 0x10 ;light up LED 0,0
-C:0000cb fda3      	sbrc r26, 3   ;if bit 4 is set
-C:0000cc 6051      	sbr r21, 0x01 ;light up LED 1,0
-C:0000cd fda2      	sbrc r26, 2   ;if bit 4 is set
-C:0000ce 6170      	sbr r23, 0x10 ;light up LED 2,0
+C:0000ca fda4      	sbrc r26, 4   ;if bit 4 is set
+C:0000cb 6140      	sbr r20, 0x10 ;light up LED 0,0
+C:0000cc fda3      	sbrc r26, 3   ;if bit 4 is set
+C:0000cd 6051      	sbr r21, 0x01 ;light up LED 1,0
+C:0000ce fda2      	sbrc r26, 2   ;if bit 4 is set
+C:0000cf 6170      	sbr r23, 0x10 ;light up LED 2,0
          	
          	;reverse direction when it reaches the edge
-C:0000cf fd50      	sbrc r21, 0 ;if LED 1,0 is on
-C:0000d0 c070      	rjmp statesEnd ;jump to end
+C:0000d0 fd50      	sbrc r21, 0 ;if LED 1,0 is on
+C:0000d1 c070      	rjmp statesEnd ;jump to end
          	
          	;if r28 == 1 and !LED(1,0) and LED(2,0): r28 = 0
          	;if r28 == 0 and !LED(1,0) and LED(0,0): r28 = 1
@@ -959,23 +962,23 @@ C:0000d0 c070      	rjmp statesEnd ;jump to end
          	;if r28 == 1 and r23H: r28 = 0
          	;if r28 == 0 and r20H: r28 = 1
          	
-C:0000d1 ffc0      	sbrs r28, 0 ;if r28 = 0
-C:0000d2 c002      	rjmp stackerMover28is0
+C:0000d2 ffc0      	sbrs r28, 0 ;if r28 = 0
+C:0000d3 c002      	rjmp stackerMover28is0
          	
          	;r28 == 1
-C:0000d3 fd74      	sbrc r23, 4 ;if r23H
-C:0000d4 e0c0      	ldi r28, 0
+C:0000d4 fd74      	sbrc r23, 4 ;if r23H
+C:0000d5 e0c0      	ldi r28, 0
          	
            stackerMover28is0:
-C:0000d5 fd44      	sbrc r20, 4 ;if r20H
-C:0000d6 e0c1      	ldi r28, 1
+C:0000d6 fd44      	sbrc r20, 4 ;if r20H
+C:0000d7 e0c1      	ldi r28, 1
          	
            statesEnd2:
-C:0000d7 c069      	rjmp statesEnd
+C:0000d8 c069      	rjmp statesEnd
          	
          	
           stackerFall:
-C:0000d8 e02d      	ldi r18, 13 ;make sure to change state to stackerFall since it jumped here
+C:0000d9 e02d      	ldi r18, 13 ;make sure to change state to stackerFall since it jumped here
          	;save the screen for later so it isn't ruined by the animations
          	;push r20
          	;push r21
@@ -986,75 +989,75 @@ C:0000d8 e02d      	ldi r18, 13 ;make sure to change state to stackerFall since 
          	;ldi r30, 0 ;keep track of if any are blinking
          	
          	;whichever ones should fall, make them blink
-C:0000d9 fd40      	sbrc r20, 0   ;if LED(0,1)==0
-C:0000da c004      	rjmp stackerFallCol1Done
-C:0000db ff44      	sbrs r20, 4   ;and LED(0,0)==1
-C:0000dc c002      	rjmp stackerFallCol1Done
-C:0000dd 704f      	cbr r20, 0xf0 ;clear LED(0,0)
-C:0000de 6440      	sbr r20, 0x40 ;set LED(0,0) to blink
+C:0000da fd40      	sbrc r20, 0   ;if LED(0,1)==0
+C:0000db c004      	rjmp stackerFallCol1Done
+C:0000dc ff44      	sbrs r20, 4   ;and LED(0,0)==1
+C:0000dd c002      	rjmp stackerFallCol1Done
+C:0000de 704f      	cbr r20, 0xf0 ;clear LED(0,0)
+C:0000df 6440      	sbr r20, 0x40 ;set LED(0,0) to blink
          	;ldi r30, 1    ;mark that at least 1 is blinking
            stackerFallCol1Done:
          	
-C:0000df fd64      	sbrc r22, 4   ;if LED(1,1)==0
-C:0000e0 c004      	rjmp stackerFallCol2Done
-C:0000e1 ff50      	sbrs r21, 0   ;and LED(1,0)==1
-C:0000e2 c002      	rjmp stackerFallCol2Done
-C:0000e3 7f50      	cbr r21, 0x0f ;clear LED(1,0)
-C:0000e4 6054      	sbr r21, 0x04 ;set LED(1,0) to blink
+C:0000e0 fd64      	sbrc r22, 4   ;if LED(1,1)==0
+C:0000e1 c004      	rjmp stackerFallCol2Done
+C:0000e2 ff50      	sbrs r21, 0   ;and LED(1,0)==1
+C:0000e3 c002      	rjmp stackerFallCol2Done
+C:0000e4 7f50      	cbr r21, 0x0f ;clear LED(1,0)
+C:0000e5 6054      	sbr r21, 0x04 ;set LED(1,0) to blink
          	;ldi r30, 1    ;mark that at least 1 is blinking
            stackerFallCol2Done:
          	
-C:0000e5 fd70      	sbrc r23, 0   ;if LED(2,1)==0
-C:0000e6 c004      	rjmp stackerFallCol3Done
-C:0000e7 ff74      	sbrs r23, 4   ;and LED(2,0)==1
-C:0000e8 c002      	rjmp stackerFallCol3Done
-C:0000e9 707f      	cbr r23, 0xf0 ;clear LED(2,0)
-C:0000ea 6470      	sbr r23, 0x40 ;set LED(2,0) to blink
+C:0000e6 fd70      	sbrc r23, 0   ;if LED(2,1)==0
+C:0000e7 c004      	rjmp stackerFallCol3Done
+C:0000e8 ff74      	sbrs r23, 4   ;and LED(2,0)==1
+C:0000e9 c002      	rjmp stackerFallCol3Done
+C:0000ea 707f      	cbr r23, 0xf0 ;clear LED(2,0)
+C:0000eb 6470      	sbr r23, 0x40 ;set LED(2,0) to blink
          	;ldi r30, 1    ;mark that at least 1 is blinking
            stackerFallCol3Done:
          	
-C:0000eb 2799      	clr r25 ;clear the counter to start the next state's timer at 0
-C:0000ec e02e      	ldi r18, 14 ;change state to shortDelay
-C:0000ed e00f      	ldi r16, 15 ;change state to stackerFall2 after that
+C:0000ec 2799      	clr r25 ;clear the counter to start the next state's timer at 0
+C:0000ed e02e      	ldi r18, 14 ;change state to shortDelay
+C:0000ee e00f      	ldi r16, 15 ;change state to stackerFall2 after that
          	
          	;if none are blinking, skip the entire rest of the animation
          	;sbrs r30, 0 ;if r30 == 0
          	;ldi r18, 18 ;change state to stackerFell
          	
-C:0000ee c052      	rjmp statesEnd
+C:0000ef c052      	rjmp statesEnd
          	
           shortDelay:
-C:0000ef fd95      	sbrc r25, 5 ;if bit 5 in the counter is 1, it has been 1/2 second so:
-C:0000f0 2f20      	mov r18, r16 ;move to whatever next state was specified in r16
-C:0000f1 c04f      	rjmp statesEnd
+C:0000f0 fd95      	sbrc r25, 5 ;if bit 5 in the counter is 1, it has been 1/2 second so:
+C:0000f1 2f20      	mov r18, r16 ;move to whatever next state was specified in r16
+C:0000f2 c04f      	rjmp statesEnd
          	
           stackerFall2:
          	;make the blinking ones fall from the top row to the middle
          	
-C:0000f2 ff46      	sbrs r20, 6   ;if LED(0,0)==4 (blinking)
-C:0000f3 c002      	rjmp stackerFall2Col1Done
-C:0000f4 7040      	cbr r20, 0xff ;turn off LED(0,0) and LED(0,1)
-C:0000f5 6044      	sbr r20, 0x04 ;set LED(0,1)=4 (blinking)
+C:0000f3 ff46      	sbrs r20, 6   ;if LED(0,0)==4 (blinking)
+C:0000f4 c002      	rjmp stackerFall2Col1Done
+C:0000f5 7040      	cbr r20, 0xff ;turn off LED(0,0) and LED(0,1)
+C:0000f6 6044      	sbr r20, 0x04 ;set LED(0,1)=4 (blinking)
            stackerFall2Col1Done:
          	
-C:0000f6 ff52      	sbrs r21, 2   ;if LED(1,0)==4 (blinking)
-C:0000f7 c003      	rjmp stackerFall2Col2Done
-C:0000f8 7f50      	cbr r21, 0x0f ;turn off LED(1,0)
-C:0000f9 706f      	cbr r22, 0xf0 ;turn off LED(1,1)
-C:0000fa 6460      	sbr r22, 0x40 ;set LED(1,1)=4 (blinking)
+C:0000f7 ff52      	sbrs r21, 2   ;if LED(1,0)==4 (blinking)
+C:0000f8 c003      	rjmp stackerFall2Col2Done
+C:0000f9 7f50      	cbr r21, 0x0f ;turn off LED(1,0)
+C:0000fa 706f      	cbr r22, 0xf0 ;turn off LED(1,1)
+C:0000fb 6460      	sbr r22, 0x40 ;set LED(1,1)=4 (blinking)
            stackerFall2Col2Done:
          	
-C:0000fb ff76      	sbrs r23, 6   ;if LED(2,0)==4 (blinking)
-C:0000fc c002      	rjmp stackerFall2Col3Done
-C:0000fd 7070      	cbr r23, 0xff ;turn off LED(2,0) and LED(2,1)
-C:0000fe 6074      	sbr r23, 0x04 ;set LED(2,1)=4 (blinking)
+C:0000fc ff76      	sbrs r23, 6   ;if LED(2,0)==4 (blinking)
+C:0000fd c002      	rjmp stackerFall2Col3Done
+C:0000fe 7070      	cbr r23, 0xff ;turn off LED(2,0) and LED(2,1)
+C:0000ff 6074      	sbr r23, 0x04 ;set LED(2,1)=4 (blinking)
            stackerFall2Col3Done:
          	
-C:0000ff 2799      	clr r25 ;clear the counter to start the next state's timer at 0
+C:000100 2799      	clr r25 ;clear the counter to start the next state's timer at 0
          	
-C:000100 e02e      	ldi r18, 14 ;change state to shortDelay
-C:000101 e102      	ldi r16, 18 ;change state to stackerFell next
-C:000102 c03e      	rjmp statesEnd
+C:000101 e02e      	ldi r18, 14 ;change state to shortDelay
+C:000102 e102      	ldi r16, 18 ;change state to stackerFell next
+C:000103 c03e      	rjmp statesEnd
          	
          ;stackerFall3:
          ;	;make the blinking ones fall from the middle to the bottom
@@ -1103,132 +1106,132 @@ C:000102 c03e      	rjmp statesEnd
          	
          	
          	;get rid of the blinking on the 2nd row from the falling animation
-C:000103 7f4b      	cbr r20, 0b00000100 ;clear LED(0,1)'s "blinking" bit
-C:000104 7b6f      	cbr r22, 0b01000000 ;clear LED(1,1)'s "blinking" bit
-C:000105 7f7b      	cbr r23, 0b00000100 ;clear LED(2,1)'s "blinking" bit
+C:000104 7f4b      	cbr r20, 0b00000100 ;clear LED(0,1)'s "blinking" bit
+C:000105 7b6f      	cbr r22, 0b01000000 ;clear LED(1,1)'s "blinking" bit
+C:000106 7f7b      	cbr r23, 0b00000100 ;clear LED(2,1)'s "blinking" bit
          	
-C:000106 27aa      	clr r26 ;reset the moving bar
+C:000107 27aa      	clr r26 ;reset the moving bar
          	
          	;recalculate the width of the moving bar
-C:000107 fd44      	sbrc r20, 4   ;if LED(0,0)==1
-C:000108 60a4      	sbr r26, 0b100
+C:000108 fd44      	sbrc r20, 4   ;if LED(0,0)==1
+C:000109 60a4      	sbr r26, 0b100
          	
-C:000109 fd50      	sbrc r21, 0   ;if LED(1,0)==1
-C:00010a 60a2      	sbr r26, 0b010
+C:00010a fd50      	sbrc r21, 0   ;if LED(1,0)==1
+C:00010b 60a2      	sbr r26, 0b010
          	
-C:00010b fd74      	sbrc r23, 4   ;if LED(2,0)==1
-C:00010c 60a1      	sbr r26, 0b001
+C:00010c fd74      	sbrc r23, 4   ;if LED(2,0)==1
+C:00010d 60a1      	sbr r26, 0b001
          	
          	;r26 can be 000, 001, 011, 111, 110, 100
          	;for the last 2, it needs to be shifted over
-C:00010d ffa0      	sbrs r26, 0 ;if the final bit is 0
-C:00010e 95a6      	lsr r26     ;shift right
-C:00010f ffa0      	sbrs r26, 0 ;if the final bit is 0
-C:000110 95a6      	lsr r26     ;shift right
+C:00010e ffa0      	sbrs r26, 0 ;if the final bit is 0
+C:00010f 95a6      	lsr r26     ;shift right
+C:000110 ffa0      	sbrs r26, 0 ;if the final bit is 0
+C:000111 95a6      	lsr r26     ;shift right
          	
          	;if the game is over
-C:000111 50a0      	subi r26, 0
-C:000112 f429      	brne stackerFellGameContinue
+C:000112 50a0      	subi r26, 0
+C:000113 f429      	brne stackerFellGameContinue
          	
          ;	ldi r18, 12 ;could go directly to generalScore and remove the next 3 lines
          	
-C:000113 27bb      	clr r27 ;clear the timer for the transition
-C:000114 e026      	ldi r18, 6 ;change state to transition
-C:000115 e00c      	ldi r16, 12 ;after that, change state to generalScore
-C:000116 e0a1      	ldi r26, 1 ;finally, it will be stackerInit
+C:000114 27bb      	clr r27 ;clear the timer for the transition
+C:000115 e026      	ldi r18, 6 ;change state to transition
+C:000116 e00c      	ldi r16, 12 ;after that, change state to generalScore
+C:000117 e0a1      	ldi r26, 1 ;finally, it will be stackerInit
          	
-C:000117 c029      	rjmp statesEnd
+C:000118 c029      	rjmp statesEnd
          	
            stackerFellGameContinue:
-C:000118 d088      	rcall fallScreen
+C:000119 d087      	rcall fallScreen
          	
          	;on every other one, go backwards
-C:000119 ff10      	sbrs r17, 0   ;if bit 0 of the score is 1
-C:00011a c004      	rjmp stackerFellBackwards
-C:00011b 6140      	sbr r20, 0x10 ;set the top left LED to be on
-C:00011c 95a2      	swap r26      ;move the row to the left side
-C:00011d e0c1      	ldi r28, 1    ;set the motion direction to be >>
-C:00011e c006      	rjmp stackerFellBackwardsAfter
+C:00011a ff10      	sbrs r17, 0   ;if bit 0 of the score is 1
+C:00011b c004      	rjmp stackerFellBackwards
+C:00011c 6140      	sbr r20, 0x10 ;set the top left LED to be on
+C:00011d 95a2      	swap r26      ;move the row to the left side
+C:00011e e0c1      	ldi r28, 1    ;set the motion direction to be >>
+C:00011f c006      	rjmp stackerFellBackwardsAfter
          	
            stackerFellBackwards:
-C:00011f e0c0      	ldi r28, 0    ;set the motion direction to be <<
-C:000120 6170      	sbr r23, 0x10 ;set the top right LED to be on
+C:000120 e0c0      	ldi r28, 0    ;set the motion direction to be <<
+C:000121 6170      	sbr r23, 0x10 ;set the top right LED to be on
          	;shift the 111, 011, or 001 to be 111, 110, or 100
-C:000121 ffa2      	sbrs r26, 2 ;if the 2nd bit is 0
-C:000122 0faa      	lsl r26     ;shift left
-C:000123 ffa2      	sbrs r26, 2 ;if the 2nd bit is 0
-C:000124 0faa      	lsl r26     ;shift left
+C:000122 ffa2      	sbrs r26, 2 ;if the 2nd bit is 0
+C:000123 0faa      	lsl r26     ;shift left
+C:000124 ffa2      	sbrs r26, 2 ;if the 2nd bit is 0
+C:000125 0faa      	lsl r26     ;shift left
          	
            stackerFellBackwardsAfter:
          	
-C:000125 2799      	clr r25 ;clear the loop counter for consistent movement
-C:000126 d0ac      	rcall incScore ;increment the score
+C:000126 2799      	clr r25 ;clear the loop counter for consistent movement
+C:000127 d0ab      	rcall incScore ;increment the score
          	
-C:000127 e02b      	ldi r18, 11 ;change state to stackerMove
+C:000128 e02b      	ldi r18, 11 ;change state to stackerMove
          	
-C:000128 2fe1      	mov r30, r17
-C:000129 50e3      	subi r30, 3 ;if score < 3
-C:00012a f408      	brsh stackerFellAfterExtraDelay
-C:00012b 95ba      	dec r27 ;decrease the delay
+C:000129 2fe1      	mov r30, r17
+C:00012a 50e3      	subi r30, 3 ;if score < 3
+C:00012b f408      	brsh stackerFellAfterExtraDelay
+C:00012c 95ba      	dec r27 ;decrease the delay
            stackerFellAfterExtraDelay:
-C:00012c 2fe1      	mov r30, r17
-C:00012d 50e9      	subi r30, 9 ;if score < 9
-C:00012e f408      	brsh stackerFellAfterExtraDelay2
-C:00012f 95ba      	dec r27 ;decrease the delay
+C:00012d 2fe1      	mov r30, r17
+C:00012e 50e9      	subi r30, 9 ;if score < 9
+C:00012f f408      	brsh stackerFellAfterExtraDelay2
+C:000130 95ba      	dec r27 ;decrease the delay
            stackerFellAfterExtraDelay2:
-C:000130 50e2      	subi r30, 2 ;if score-9 == 2 (aka score == 11)
-C:000131 f409      	brne stackerFellAfterExtraDelay3
-C:000132 95ba      	dec r27 ;decrease the delay
+C:000131 50e2      	subi r30, 2 ;if score-9 == 2 (aka score == 11)
+C:000132 f409      	brne stackerFellAfterExtraDelay3
+C:000133 95ba      	dec r27 ;decrease the delay
            stackerFellAfterExtraDelay3:
-C:000133 50e3      	subi r30, 3 ;if score-9-2 == 3 (aka score == 14)
-C:000134 f461      	brne statesEnd
-C:000135 95ba      	dec r27 ;decrease the delay
+C:000134 50e3      	subi r30, 3 ;if score-9-2 == 3 (aka score == 14)
+C:000135 f461      	brne statesEnd
+C:000136 95ba      	dec r27 ;decrease the delay
          	
-C:000136 c00a      	rjmp statesEnd
+C:000137 c00a      	rjmp statesEnd
          	
           generalScore:
-C:000137 2fe1      	mov r30, r17
-C:000138 d075      	rcall showScore
-C:000139 7f3e      	cbr r19, 0b00000001 ;disregard S
-C:00013a 5030      	subi r19, 0 ;if any button was pressed
-C:00013b f029      	breq statesEnd
+C:000138 2fe1      	mov r30, r17
+C:000139 d074      	rcall showScore
+C:00013a 7036      	cbr r19, 0b11111001 ;disregard S (clear everything except R and L)
+C:00013b 5030      	subi r19, 0 ;if any button was pressed
+C:00013c f029      	breq statesEnd
          	
          	;either L or R was pressed
-C:00013c 27bb      	clr r27	;clear the timer for the transition state
-C:00013d e026      	ldi r18, 6 ;change state to transition
-C:00013e 2f0a      	mov r16, r26 ;after that the state will be whatever was given unless
-C:00013f fd32      	sbrc r19, 2 ;if L was just pressed
-C:000140 e000      	ldi r16, 0 ;after that the state will be gameSelect
+C:00013d 27bb      	clr r27	;clear the timer for the transition state
+C:00013e e026      	ldi r18, 6 ;change state to transition
+C:00013f 2f0a      	mov r16, r26 ;after that the state will be whatever was given unless
+C:000140 fd32      	sbrc r19, 2 ;if L was just pressed
+C:000141 e000      	ldi r16, 0 ;after that the state will be gameSelect
          	
          	
           statesEnd:
          	;;; UPDATE IO ;;;
          	
          	
-C:000141 2f38      	mov r19, r24 ;copy current button values to know prev for edge detection
-C:000142 7f88      	cbr r24, 0b00000111 ;clear the button state bits
-C:000143 e0d4      	ldi r29, 0b00000100 ;bit mask for PB2 (L button) and r24 button states
+C:000142 2f38      	mov r19, r24 ;copy current button values to know prev for edge detection
+C:000143 7f88      	cbr r24, 0b00000111 ;clear the button state bits
+C:000144 e0d4      	ldi r29, 0b00000100 ;bit mask for PB2 (L button) and r24 button states
          	;will be shifted right to get PB1, then PB0, and to write to a different r24 bit
          
           buttonLoop:
-C:000144 b9d1      	out DDRB, r29 ;set the current pin to output
-C:000145 e0e0      	ldi r30, 0x00
-C:000146 b9e2      	out PORTB, r30 ;set all pins low
-C:000147 d048      	rcall buttonDelay
-C:000148 9b03      	sbis PINB, PB3 ;skip the next line if PB3 is 1
-C:000149 2b8d      	or r24, r29 ;set the button's bit to 1
+C:000145 b9d1      	out DDRB, r29 ;set the current pin to output
+C:000146 e0e0      	ldi r30, 0x00
+C:000147 b9e2      	out PORTB, r30 ;set all pins low
+C:000148 d047      	rcall buttonDelay
+C:000149 9b03      	sbis PINB, PB3 ;skip the next line if PB3 is 1
+C:00014a 2b8d      	or r24, r29 ;set the button's bit to 1
          
-C:00014a 95d6      	lsr r29 ;shift the bitmask to set a different pin as an output
-C:00014b 50d0      	subi r29, 0 ;check if the shift fell off the end, which means we are done
-C:00014c f7b9      	brne buttonLoop ;keep going until no pin is selected
+C:00014b 95d6      	lsr r29 ;shift the bitmask to set a different pin as an output
+C:00014c 50d0      	subi r29, 0 ;check if the shift fell off the end, which means we are done
+C:00014d f7b9      	brne buttonLoop ;keep going until no pin is selected
          	
          	;button edge detection (just pressed)
          	;just = !prev && curr
          	;r19 = !r19 & r24L
          	
-C:00014d 9530      	com r19 ;invert all bits to create !prev instead of prev
-C:00014e 2338      	and r19, r24 ;preform the "and" to get "just pressed"
-C:00014f 7037      	cbr r19, 0b11111000 ;clear the unused bits in r19 for predictability
+C:00014e 9530      	com r19 ;invert all bits to create !prev instead of prev
+C:00014f 2338      	and r19, r24 ;preform the "and" to get "just pressed"
+         	; cbr r19, 0b11111000 ;clear the unused bits in r19 for predictability (don't need, accounted for by expecting them to be random)
          	
          	;0,0
 C:000150 2fe4      	mov r30, r20 ;copy the LED's register to r30
@@ -1294,7 +1297,7 @@ C:000179 e0e0      	ldi r30, 0x00 ;set everything as inputs
 C:00017a b9e1      	out DDRB, r30
          	
 C:00017b 9593      	inc r25 ;increment the loop counter
-C:00017c ce92      	rjmp loop
+C:00017c ce90      	rjmp loop
          	
          	
          	;;; FUNCTIONS ;;;
